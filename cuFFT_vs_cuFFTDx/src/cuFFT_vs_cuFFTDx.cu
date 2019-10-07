@@ -1,10 +1,13 @@
-#include <iostream>
-#include <limits>
-#include <stdexcept>  // std::runtime_error
 #include <cufft.h>
 #include <cufftXt.h>
 #include <helper_cuda.h>
 #include <nvToolsExt.h>
+
+// For GPU Warm-up
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+#include <thrust/functional.h>
+#include <thrust/transform.h>
 
 #include "/home/belt/Downloads/nvidia-cufftdx-0.0.1-Linux/cufftdx/include/cufftdx.hpp"
 #include "/home/belt/Downloads/nvidia-cufftdx-0.0.1-Linux/cufftdx/example/block_io.hpp"
@@ -34,10 +37,10 @@ const int num_colors = sizeof( colors ) / sizeof(uint32_t);
 constexpr int kDataSize = 1024;
 constexpr int kBatch = 4;
 constexpr int kRank = 1;
-constexpr int kElementsPerThread = 4;
+constexpr int kElementsPerThread = 2;
 constexpr float kScale = 2.0f;
 constexpr float kMultiplier = 4.0f;
-constexpr float kTolerance = 0.001; // Used to compare cuFFT / cuFFTDx results
+constexpr float kTolerance = 1e-6f; // Used to compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {
 	return ( i * j + k );
@@ -90,7 +93,7 @@ template<typename T>
 __device__ T CB_MulAndScaleInputC( void *dataIn, size_t offset, void *callerInfo, void *sharedPtr ) {
 	cb_inParams<T> * params = static_cast<cb_inParams<T>*>( callerInfo );
 	return ( ComplexScale( ComplexMul( static_cast<T*>( dataIn )[offset], ( params->multiplier )[offset] ),
-			params->scale ) );
+					params->scale ) );
 }
 
 // Output Callback
@@ -156,24 +159,24 @@ __launch_bounds__(IFFT::max_threads_per_block) __global__ void block_ifft_kernel
 	example::io < IFFT > ::load( inputData, thread_data, local_fft_id );
 
 	// Execute input callback functionality
-	const uint offset = example::io < IFFT > ::batch_offset( local_fft_id );
-	const uint stride = example::io < IFFT > ::stride_size();
-	uint index = offset + threadIdx.x;
-	for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
-		thread_data[i] = ComplexScale( ComplexMul( thread_data[i], ( inParams->multiplier )[index] ), inParams->scale );
-		index += stride;
-	}
+//	const uint offset = example::io < IFFT > ::batch_offset( local_fft_id );
+//	const uint stride = example::io < IFFT > ::stride_size();
+//	uint index = offset + threadIdx.x;
+//	for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
+//		thread_data[i] = ComplexScale( ComplexMul( thread_data[i], ( inParams->multiplier )[index] ), inParams->scale );
+//		index += stride;
+//	}
 
 	// Execute FFT
 	IFFT().execute( thread_data, shared_mem );
 
 	// Execute output callback functionality
-	index = offset + threadIdx.x;
-	for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
-		thread_data[i] = ComplexScale( ComplexMul( thread_data[i], ( outParams->multiplier )[index] ),
-				outParams->scale );
-		index += stride;
-	}
+//	index = offset + threadIdx.x;
+//	for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
+//		thread_data[i] = ComplexScale( ComplexMul( thread_data[i], ( outParams->multiplier )[index] ),
+//				outParams->scale );
+//		index += stride;
+//	}
 
 	// Save results
 	example::io < IFFT > ::store( thread_data, outputData, local_fft_id );
@@ -181,95 +184,45 @@ __launch_bounds__(IFFT::max_threads_per_block) __global__ void block_ifft_kernel
 
 // Helper function to print
 template<typename T>
-void printFunction( T * data ) {
+void printFunction( T * const data ) {
 	for ( int i = 0; i < kBatch; i++ )
 		for ( int j = 0; j < kDataSize; j++ )
 			printf( "Re = %0.2f; Im = %0.2f\n", data[index( i, kDataSize, j )].x, data[index( i, kDataSize, j )].y );
 }
 
 template<typename T>
-void verifyResults( T const *cufftHostData, T const*cufftDxHostData ) {
+void verifyResults( T const *ref, T const *alt, const int & signalSize ) {
 
-	T const * a = cufftHostData;
-	T const * b = cufftDxHostData;
+	float2 *relError = new float2[signalSize];
 
 	for ( int i = 0; i < kBatch; i++ )
 		for ( int j = 0; j < kDataSize; j++ ) {
-			if ( std::fabs( a[index( i, kDataSize, j )].x - b[index( i, kDataSize, j )].x ) > kTolerance )
-				printf( "R - Batch %d: Element %d: %f - %f (%f) > %f\n", i, j, a[index( i, kDataSize, j )].x,
-						b[index( i, kDataSize, j )].x,
-						std::fabs( a[index( i, kDataSize, j )].x - b[index( i, kDataSize, j )].x ), kTolerance );
-			if ( std::fabs( a[index( i, kDataSize, j )].y - b[index( i, kDataSize, j )].y ) > kTolerance )
-				printf( "I - Batch %d: Element %d: %f - %f (%f) > %f\n", i, j, a[index( i, kDataSize, j )].y,
-						b[index( i, kDataSize, j )].y,
-						std::fabs( a[index( i, kDataSize, j )].y - b[index( i, kDataSize, j )].y ), kTolerance );
-		}
+			int idx = index( i, kDataSize, j );
+			relError[idx].x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
+			relError[idx].y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
 
-//	printf( "All values match\n" );
+			if ( relError[idx].x > kTolerance )
+				printf( "R - Batch %d: Element %d: %f - %f (%0.7f) > %f\n", i, j, ref[idx].x, alt[idx].x, relError[idx].x,
+						kTolerance );
+
+			if ( relError[idx].y > kTolerance )
+				printf( "I - Batch %d: Element %d: %f - %f (%0.7f) > %f\n", i, j, ref[idx].y, alt[idx].y, relError[idx].y,
+						kTolerance );
+		}
 }
 
-// Warm-up function identical to cufftMalloc
-//void warmUpFunction( const int & signalSize, fft_params & fftPlan ) {
-//
-//	// Create cufftHandle
-//	cufftHandle handle;
-//
-//	// Create host data arrays
-//	cufftComplex *h_inputData = new cufftComplex[signalSize];
-//	cufftComplex *h_outputData = new cufftComplex[signalSize];
-//
-//	for ( int i = 0; i < kBatch; i++ )
-//		for ( int j = 0; j < kDataSize; j++ )
-//			h_inputData[i * kDataSize + j] = make_cuComplex( ( i + j ), ( i - j ) );
-//
-//	// Create device data arrays
-//	cufftComplex *d_inputData;
-//	cufftComplex *d_outputData;
-//
-//	checkCudaErrors( cudaMalloc( (void** )&d_inputData, signalSize ) );
-//	checkCudaErrors( cudaMalloc( (void** )&d_outputData, signalSize ) );
-//
-//	// Copy input data to device
-//	checkCudaErrors( cudaMemcpy( d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
-//
-//	// Create callback parameters
-//	cb_inParams h_params;
-//	h_params.scale = 2.0f;
-//
-//	// Copy callback parameters to device
-//	cb_inParams *d_params;
-//	checkCudaErrors( cudaMalloc( (void ** )&d_params, sizeof(cb_inParams) ) );
-//	checkCudaErrors( cudaMemcpy( d_params, &h_params, sizeof(cb_inParams), cudaMemcpyHostToDevice ) );
-//
-//	checkCudaErrors(
-//			cufftPlanMany( &handle, fftPlan.rank, fftPlan.n, fftPlan.inembed, fftPlan.istride, fftPlan.idist,
-//					fftPlan.onembed, fftPlan.ostride, fftPlan.odist, CUFFT_C2C, fftPlan.batch ) );
-//
-//	// Create host callback pointers
-//	cufftCallbackLoadC h_loadCallbackPtr;
-//	cufftCallbackStoreC h_storeCallbackPtr;
-//
-//	// Copy device pointers to host
-//	checkCudaErrors( cudaMemcpyFromSymbol( &h_loadCallbackPtr, d_loadCallbackPtr, sizeof( h_loadCallbackPtr ) ) );
-//	checkCudaErrors( cudaMemcpyFromSymbol( &h_storeCallbackPtr, d_storeCallbackPtr, sizeof( h_storeCallbackPtr ) ) );
-//
-//	// Set input callback
-//	checkCudaErrors(
-//			cufftXtSetCallback( handle, (void ** ) &h_loadCallbackPtr, CUFFT_CB_LD_COMPLEX, (void ** )&d_params ) );
-//
-//	// Set output callback
-//	checkCudaErrors(
-//			cufftXtSetCallback( handle, (void ** ) &h_storeCallbackPtr, CUFFT_CB_ST_COMPLEX, (void ** )&d_params ) );
-//
-//	// Execute FFT plan
-//	checkCudaErrors( cufftExecC2C( handle, d_inputData, d_outputData, CUFFT_FORWARD ) );
-//
-//	// Cleanup Memory
-//	free( h_inputData );
-//	free( h_outputData );
-//	checkCudaErrors( cudaFree( d_inputData ) );
-//	checkCudaErrors( cudaFree( d_outputData ) );
-//}
+// Warm-up function
+void warmUpFunction( ) {
+
+	using namespace thrust::placeholders;
+
+	int N = 1 << 20;
+	thrust::device_vector<int> d_x( N, 2 ); // alloc and copy host to device
+	thrust::device_vector<int> d_y( N, 4 );
+
+	// Perform SAXPY on 1M elements
+	thrust::transform( d_x.begin(), d_x.end(), d_y.begin(), d_y.begin(), 2.0f * _1 + _2 );
+}
 
 // cuFFT example using explicit memory copies
 template<typename T>
@@ -358,16 +311,16 @@ void cufftMalloc( T * h_outputData, const int & signalSize, fft_params & fftPlan
 	checkCudaErrors( cudaMemcpyFromSymbol( &h_storeCallbackPtr, d_storeCallbackPtr, sizeof( h_storeCallbackPtr ) ) );
 	POP_RANGE()
 
-	PUSH_RANGE( "cufftXtSetCallback", 6 )
-	// Set input callback
-	checkCudaErrors(
-			cufftXtSetCallback( fft_inverse, (void ** ) &h_loadCallbackPtr, CUFFT_CB_LD_COMPLEX,
-					(void ** )&d_inParams ) );
-
-	// Set output callback
-	checkCudaErrors(
-			cufftXtSetCallback( fft_inverse, (void ** ) &h_storeCallbackPtr, CUFFT_CB_ST_COMPLEX,
-					(void ** )&d_outParams ) );
+//	PUSH_RANGE( "cufftXtSetCallback", 6 )
+//	// Set input callback
+//	checkCudaErrors(
+//			cufftXtSetCallback( fft_inverse, (void ** ) &h_loadCallbackPtr, CUFFT_CB_LD_COMPLEX,
+//					(void ** )&d_inParams ) );
+//
+//	// Set output callback
+//	checkCudaErrors(
+//			cufftXtSetCallback( fft_inverse, (void ** ) &h_storeCallbackPtr, CUFFT_CB_ST_COMPLEX,
+//					(void ** )&d_outParams ) );
 	POP_RANGE()
 
 	PUSH_RANGE( "cufftExecC2C", 7 )
@@ -591,7 +544,6 @@ void cuFFTDxMalloc( T * h_outputData ) {
 //}
 
 // Returns CUDA device compute capability
-
 uint get_cuda_device_arch( ) {
 	int device;
 	checkCudaErrors( cudaGetDevice( &device ) );
@@ -605,7 +557,7 @@ uint get_cuda_device_arch( ) {
 int main( int argc, char **argv ) {
 
 	// Calculate size of signal array to process
-	size_t signalSize = sizeof(cufftComplex) * kDataSize * kBatch;
+	const size_t signalSize = sizeof(cufftComplex) * kDataSize * kBatch;
 
 	// Set fft plan parameters
 	fft_params fftPlan = { kRank, { kDataSize }, 1, 1, kDataSize, kDataSize, { 0 }, { 0 }, kBatch };
@@ -616,8 +568,10 @@ int main( int argc, char **argv ) {
 	cuFloatComplex *cufftHostData = new cuFloatComplex[signalSize];
 	cuFloatComplex *cufftDxHostData = new cuFloatComplex[signalSize];
 
-//	warmUpFunction( signalSize, fftPlan );
+	// Warm-up GPU
+	warmUpFunction();
 
+	// Run basic cuFFT example with callbacks
 	cufftMalloc < cuFloatComplex > ( cufftHostData, signalSize, fftPlan );
 
 #if PRINT
@@ -627,6 +581,7 @@ int main( int argc, char **argv ) {
 
 //	useCudaManaged( signalSize, fftPlan );
 
+	// Run cuFFTDx example to replicate cuFFT functionality
 	switch ( arch ) {
 	case 700:
 		cuFFTDxMalloc<700, cuFloatComplex>( cufftDxHostData );
@@ -648,5 +603,5 @@ int main( int argc, char **argv ) {
 	}
 
 	// Verify cuFFT and cuFFTDx have the same results
-	verifyResults( cufftHostData, cufftDxHostData );
+	verifyResults( cufftHostData, cufftDxHostData, signalSize );
 }
