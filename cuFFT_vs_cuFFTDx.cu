@@ -5,8 +5,6 @@
 #include <nvToolsExt.h>
 
 #include <thrust/device_vector.h>
-#include <thrust/functional.h>
-#include <thrust/host_vector.h>
 #include <thrust/transform.h>
 
 #include "block_io.hpp"
@@ -38,10 +36,10 @@ const int      num_colors { sizeof( colors ) / sizeof( uint32_t ) };
 constexpr int   kDataSize { 4096 };
 constexpr int   kBatch { 1 };
 constexpr int   kRank { 1 };
-constexpr int   kElementsPerThread { 4 };
+constexpr int   kElementsPerThread { 8 };
 constexpr float kScale { 1.0f };
 constexpr float kMultiplier { 1.0f };
-constexpr float kTolerance { 1e-4f };  // Compare cuFFT / cuFFTDx results
+constexpr float kTolerance { 1e-3f };  // Compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {
     return ( i * j + k );
@@ -60,17 +58,15 @@ struct cb_outParams {
 };
 
 typedef struct _fft_params {
-    int rank;            // --- 1D FFTs
-    int n[kRank];        // --- Size of the Fourier transform
-    int istride;         // --- Distance between two successive input elements
-    int ostride;         // --- Distance between two successive output elements
-    int idist;           // --- Distance between input batches
-    int odist;           // --- Distance between output batches
-    int inembed[kRank];  // --- Input size with pitch (ignored for 1D
-                         // transforms)
-    int onembed[kRank];  // --- Output size with pitch (ignored for 1D
-                         // transforms)
-    int batch;           // --- Number of batched executions
+    int rank;            // 1D FFTs
+    int n[kRank];        // Size of the Fourier transform
+    int istride;         // Distance between two successive input elements
+    int ostride;         // Distance between two successive output elements
+    int idist;           // Distance between input batches
+    int odist;           // Distance between output batches
+    int inembed[kRank];  // Input size with pitch (ignored for 1D transforms)
+    int onembed[kRank];  // Output size with pitch (ignored for 1D transforms)
+    int batch;           // Number of batched executions
 } fft_params;
 
 // Complex multiplication
@@ -131,6 +127,7 @@ template<class FFT>
 __launch_bounds__( FFT::max_threads_per_block ) __global__
     void block_fft_kernel( typename FFT::value_type *inputData,
                            typename FFT::value_type *outputData ) {
+
     using complex_type = typename FFT::value_type;
 
     extern __shared__ complex_type shared_mem[];
@@ -203,20 +200,22 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
 // Helper function to print
 template<typename T>
 void printFunction( T *const data ) {
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
-            printf( "Re = %0.2f; Im = %0.2f\n",
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
+            printf( "Re = %0.6f; Im = %0.6f\n",
                     data[index( i, kDataSize, j )].x,
                     data[index( i, kDataSize, j )].y );
+        }
+    }
 }
 
 template<typename T>
 void verifyResults( T const *ref, T const *alt, const int &signalSize ) {
 
     float2 *relError = new float2[signalSize];
-    int     counter  = 0;
+    int     counter {};
 
-    for ( int i = 0; i < kBatch; i++ )
+    for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
             int idx         = index( i, kDataSize, j );
             relError[idx].x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
@@ -244,9 +243,11 @@ void verifyResults( T const *ref, T const *alt, const int &signalSize ) {
                 counter++;
             }
         }
+    }
 
-    if ( !counter )
+    if ( !counter ) {
         printf( "All values match!\n\n" );
+    }
 }
 
 // Warm-up function
@@ -285,10 +286,12 @@ void cufftMalloc( T *         h_outputData,
 
     PUSH_RANGE( "Prep Input", 2 )
     // Create input data
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             h_inputData[index( i, kDataSize, j )] =
                 make_cuComplex( ( i + j ), ( i - j ) );
+        }
+    }
 
 #if PRINT
     printf( "\nPrinting input data\n" );
@@ -309,10 +312,12 @@ void cufftMalloc( T *         h_outputData,
     // Create multiplier data
     cufftComplex *h_multiplier = new cufftComplex[signalSize];
 
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             h_multiplier[index( i, kDataSize, j )] =
                 make_cuComplex( kMultiplier, kMultiplier );
+        }
+    }
 
     cufftComplex *d_multiplier;
 
@@ -469,10 +474,12 @@ void useCudaManaged( T *         h_outputData,
         cudaMemPrefetchAsync( inputData, signalSize, cudaCpuDeviceId, 0 ) );
 
     // Create input data
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             inputData[i * kDataSize + j] =
                 make_cuComplex( ( i + j ), ( i - j ) );
+        }
+    }
 
     POP_RANGE( )
 
@@ -492,10 +499,12 @@ void useCudaManaged( T *         h_outputData,
     checkCudaErrors( cudaMallocManaged( &h_inParams->multiplier, signalSize ) );
 
     // Create multiplier data
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             h_inParams->multiplier[index( i, kDataSize, j )] =
                 make_cuComplex( kMultiplier, kMultiplier );
+        }
+    }
 
     cb_outParams<cufftComplex> *h_outParams;
 
@@ -504,10 +513,12 @@ void useCudaManaged( T *         h_outputData,
     h_outParams->scale = kScale;
     checkCudaErrors(
         cudaMallocManaged( &h_outParams->multiplier, signalSize ) );
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             h_outParams->multiplier[index( i, kDataSize, j )] =
                 h_inParams->multiplier[index( i, kDataSize, j )];
+        }
+    }
 
     POP_RANGE( )
 
@@ -559,7 +570,7 @@ void useCudaManaged( T *         h_outputData,
     checkCudaErrors( cudaDeviceSynchronize( ) );
     // Copy data from device to host
     checkCudaErrors( cudaMemcpy(
-        outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
+        h_outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
     printf( "\nPrinting buffer data\n" );
     printFunction( h_outputData );
 #endif
@@ -628,10 +639,12 @@ void cuFFTDxMalloc( T *h_outputData ) {
     complex_type *h_inputData = new complex_type[sizeBytes];
 
     // Create data
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             h_inputData[index( i, kDataSize, j )] =
                 complex_type { float( i + j ), float( i - j ) };
+        }
+    }
 
 #if PRINT
     printf( "\nPrinting input data\n" );
@@ -658,10 +671,12 @@ void cuFFTDxMalloc( T *h_outputData ) {
     // Create multiplier data
     complex_type *h_multiplier = new complex_type[sizeBytes];
 
-    for ( int i = 0; i < kBatch; i++ )
-        for ( int j = 0; j < kDataSize; j++ )
+    for ( int i = 0; i < kBatch; i++ ) {
+        for ( int j = 0; j < kDataSize; j++ ) {
             h_multiplier[index( i, kDataSize, j )] =
                 complex_type { kMultiplier, kMultiplier };
+        }
+    }
 
     complex_type *d_multiplier;
 
@@ -777,6 +792,11 @@ int main( int argc, char **argv ) {
 
     useCudaManaged<cuFloatComplex>( cufftManagedHostData, signalSize, fftPlan );
 
+// #if PRINT
+//     printf( "\nPrinting cufftManagedHostData data\n" );
+//     printFunction( cufftManagedHostData );
+// #endif
+
     // Verify cuFFT (cudaMalloc vs cudaManagedMalloc) have the same results
     printf( "Compare cuFFT (cudaMalloc vs cudaMallocManaged)\n" );
     verifyResults( cufftHostData, cufftManagedHostData, signalSize );
@@ -786,13 +806,6 @@ int main( int argc, char **argv ) {
 
     // Run cuFFTDx example to replicate cuFFT functionality
     switch ( arch ) {
-    case 700:
-        cuFFTDxMalloc<700, cuFloatComplex>( cufftDxHostData );
-#if PRINT
-        printf( "\nPrinting cufftDxHostData data\n" );
-        printFunction( cufftDxHostData );
-#endif
-        break;
     case 750:
         cuFFTDxMalloc<750, cuFloatComplex>( cufftDxHostData );
 #if PRINT
