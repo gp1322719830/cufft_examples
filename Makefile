@@ -1,9 +1,9 @@
 NVCC	:=nvcc -ccbin g++
 CFLAGS	:=-O3 -std=c++14
 ARCHES	:=-gencode arch=compute_75,code=\"compute_75,sm_75\"
-INC_DIR	:=-I/usr/local/cuda/samples/common/inc -I/usr/local/cuda/include/cufftdx/
+INC_DIR	:=-I/usr/local/cuda/samples/common/inc -I/usr/local/cuda/include/cufftdx/include
 LIB_DIR	:=
-LIBS	:=-lnvToolsExt -lcufft_static -lculibos
+LIBS	:=-lcufft_static -lculibos
 
 SOURCES := cuFFT_vs_cuFFTDx \
 

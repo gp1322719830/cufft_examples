@@ -2,7 +2,7 @@
 #include <cufftXt.h>
 #include <cufftdx.hpp>
 #include <helper_cuda.h>
-#include <nvToolsExt.h>
+#include <nvtx3/nvToolsExt.h>
 
 #include <thrust/device_vector.h>
 #include <thrust/transform.h>
