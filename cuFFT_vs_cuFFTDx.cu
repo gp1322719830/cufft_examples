@@ -1,7 +1,9 @@
+#include <functional>
+#include <stdexcept>
+
 #include <cufft.h>
 #include <cufftXt.h>
 #include <cufftdx.hpp>
-#include <helper_cuda.h>
 #include <nvtx3/nvToolsExt.h>
 
 #include <thrust/device_vector.h>
@@ -11,23 +13,41 @@
 
 #define PRINT 0
 
+// *************** FOR ERROR CHECKING *******************
+#ifndef CUDA_RT_CALL
+#define CUDA_RT_CALL( call )                                                                                           \
+    {                                                                                                                  \
+        auto status = static_cast<cudaError_t>( call );                                                                \
+        if ( status != cudaSuccess )                                                                                   \
+            fprintf( stderr,                                                                                           \
+                     "ERROR: CUDA RT call \"%s\" in line %d of file %s failed "                                        \
+                     "with "                                                                                           \
+                     "%s (%d).\n",                                                                                     \
+                     #call,                                                                                            \
+                     __LINE__,                                                                                         \
+                     __FILE__,                                                                                         \
+                     cudaGetErrorString( status ),                                                                     \
+                     status );                                                                                         \
+    }
+#endif  // CUDA_RT_CALL
+// *************** FOR ERROR CHECKING *******************
+
 // *************** FOR NVTX *******************
-const uint32_t colors[] { 0xff00ff00, 0xff0000ff, 0xffffff00, 0xffff00ff,
-                          0xff00ffff, 0xffff0000, 0xffffffff };
+const uint32_t colors[] { 0xff00ff00, 0xff0000ff, 0xffffff00, 0xffff00ff, 0xff00ffff, 0xffff0000, 0xffffffff };
 const int      num_colors { sizeof( colors ) / sizeof( uint32_t ) };
 
-#define PUSH_RANGE( name, cid )                                                \
-    {                                                                          \
-        int color_id                      = cid;                               \
-        color_id                          = color_id % num_colors;             \
-        nvtxEventAttributes_t eventAttrib = { 0 };                             \
-        eventAttrib.version               = NVTX_VERSION;                      \
-        eventAttrib.size                  = NVTX_EVENT_ATTRIB_STRUCT_SIZE;     \
-        eventAttrib.colorType             = NVTX_COLOR_ARGB;                   \
-        eventAttrib.color                 = colors[color_id];                  \
-        eventAttrib.messageType           = NVTX_MESSAGE_TYPE_ASCII;           \
-        eventAttrib.message.ascii         = name;                              \
-        nvtxRangePushEx( &eventAttrib );                                       \
+#define PUSH_RANGE( name, cid )                                                                                        \
+    {                                                                                                                  \
+        int color_id                      = cid;                                                                       \
+        color_id                          = color_id % num_colors;                                                     \
+        nvtxEventAttributes_t eventAttrib = { 0 };                                                                     \
+        eventAttrib.version               = NVTX_VERSION;                                                              \
+        eventAttrib.size                  = NVTX_EVENT_ATTRIB_STRUCT_SIZE;                                             \
+        eventAttrib.colorType             = NVTX_COLOR_ARGB;                                                           \
+        eventAttrib.color                 = colors[color_id];                                                          \
+        eventAttrib.messageType           = NVTX_MESSAGE_TYPE_ASCII;                                                   \
+        eventAttrib.message.ascii         = name;                                                                      \
+        nvtxRangePushEx( &eventAttrib );                                                                               \
     }
 
 #define POP_RANGE( ) nvtxRangePop( );
@@ -82,34 +102,26 @@ __device__ T ComplexScale( T const &a, float const &scale ) {
 template<typename T>
 __device__ T ComplexMul( T const &a, T const &b ) {
     T c;
-    c.x = a.x * b.x;
-    c.y = a.y * b.y;
+    c.x = a.x * b.x - a.y * b.y;
+    c.y = a.x * b.y + a.y * b.x;
     return ( c );
 }
 
 // Input Callback
 template<typename T>
-__device__ T CB_MulAndScaleInputC( void * dataIn,
-                                   size_t offset,
-                                   void * callerInfo,
-                                   void * sharedPtr ) {
+__device__ T CB_MulAndScaleInputC( void *dataIn, size_t offset, void *callerInfo, void *sharedPtr ) {
     cb_inParams<T> *params = static_cast<cb_inParams<T> *>( callerInfo );
-    return ( ComplexScale( ComplexMul( static_cast<T *>( dataIn )[offset],
-                                       ( params->multiplier )[offset] ),
+    return ( ComplexScale( ComplexMul( static_cast<T *>( dataIn )[offset], ( params->multiplier )[offset] ),
                            params->scale ) );
 }
 
 // Output Callback
 template<typename T>
-__device__ void CB_MulAndScaleOutputC( void * dataOut,
-                                       size_t offset,
-                                       T      element,
-                                       void * callerInfo,
-                                       void * sharedPtr ) {
+__device__ void CB_MulAndScaleOutputC( void *dataOut, size_t offset, T element, void *callerInfo, void *sharedPtr ) {
     cb_outParams<T> *params { static_cast<cb_outParams<T> *>( callerInfo ) };
 
-    static_cast<T *>( dataOut )[offset] = ComplexScale(
-        ComplexMul( element, ( params->multiplier )[offset] ), params->scale );
+    static_cast<T *>( dataOut )[offset] =
+        ComplexScale( ComplexMul( element, ( params->multiplier )[offset] ), params->scale );
 }
 
 // Define variables to point at callbacks
@@ -117,16 +129,13 @@ __device__ cufftCallbackLoadC d_loadCallbackPtr   = CB_MulAndScaleInputC;
 __device__ cufftCallbackStoreC d_storeCallbackPtr = CB_MulAndScaleOutputC;
 
 // Define variables to point at callbacks
-__device__ __managed__ cufftCallbackLoadC d_loadManagedCallbackPtr =
-    CB_MulAndScaleInputC;
-__device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr =
-    CB_MulAndScaleOutputC;
+__device__ __managed__ cufftCallbackLoadC d_loadManagedCallbackPtr   = CB_MulAndScaleInputC;
+__device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr = CB_MulAndScaleOutputC;
 
 // cuFFTDx Forward FFT CUDA kernel
 template<class FFT>
 __launch_bounds__( FFT::max_threads_per_block ) __global__
-    void block_fft_kernel( typename FFT::value_type *inputData,
-                           typename FFT::value_type *outputData ) {
+    void block_fft_kernel( typename FFT::value_type *inputData, typename FFT::value_type *outputData ) {
 
     using complex_type = typename FFT::value_type;
 
@@ -174,9 +183,7 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     const uint stride = example::io<IFFT>::stride_size( );
     uint       index  = offset + threadIdx.x;
     for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
-        thread_data[i] = ComplexScale(
-            ComplexMul( thread_data[i], ( inParams->multiplier )[index] ),
-            inParams->scale );
+        thread_data[i] = ComplexScale( ComplexMul( thread_data[i], ( inParams->multiplier )[index] ), inParams->scale );
         index += stride;
     }
 
@@ -187,9 +194,8 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     index = offset + threadIdx.x;
 
     for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
-        thread_data[i] = ComplexScale(
-            ComplexMul( thread_data[i], ( outParams->multiplier )[index] ),
-            outParams->scale );
+        thread_data[i] =
+            ComplexScale( ComplexMul( thread_data[i], ( outParams->multiplier )[index] ), outParams->scale );
         index += stride;
     }
 
@@ -202,9 +208,7 @@ template<typename T>
 void printFunction( T *const data ) {
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            printf( "Re = %0.6f; Im = %0.6f\n",
-                    data[index( i, kDataSize, j )].x,
-                    data[index( i, kDataSize, j )].y );
+            printf( "Re = %0.6f; Im = %0.6f\n", data[index( i, kDataSize, j )].x, data[index( i, kDataSize, j )].y );
         }
     }
 }
@@ -260,15 +264,12 @@ void warmUpFunction( ) {
     thrust::device_vector<int> d_y( N, 4 );
 
     // Perform SAXPY on 1M elements
-    thrust::transform(
-        d_x.begin( ), d_x.end( ), d_y.begin( ), d_y.begin( ), 2.0f * _1 + _2 );
+    thrust::transform( d_x.begin( ), d_x.end( ), d_y.begin( ), d_y.begin( ), 2.0f * _1 + _2 );
 }
 
 // cuFFT example using explicit memory copies
 template<typename T>
-void cufftMalloc( T *         h_outputData,
-                  const int & signalSize,
-                  fft_params &fftPlan ) {
+void cufftMalloc( T *h_outputData, const int &signalSize, fft_params &fftPlan ) {
 
     PUSH_RANGE( __FUNCTION__, 1 )
 
@@ -277,19 +278,18 @@ void cufftMalloc( T *         h_outputData,
     cufftHandle fft_inverse;
 
     // Create host data arrays
-    cufftComplex *h_inputData = new cufftComplex[signalSize];
+    T *h_inputData = new T[signalSize];
 
     // Create device data arrays
-    cufftComplex *d_inputData;
-    cufftComplex *d_outputData;
-    cufftComplex *d_bufferData;
+    T *d_inputData;
+    T *d_outputData;
+    T *d_bufferData;
 
     PUSH_RANGE( "Prep Input", 2 )
     // Create input data
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_inputData[index( i, kDataSize, j )] =
-                make_cuComplex( ( i + j ), ( i - j ) );
+            h_inputData[index( i, kDataSize, j )] = make_cuComplex( ( i + j ), ( i - j ) );
         }
     }
 
@@ -298,85 +298,74 @@ void cufftMalloc( T *         h_outputData,
     printFunction( h_inputData );
 #endif
 
-    checkCudaErrors( cudaMalloc( ( void ** )&d_inputData, signalSize ) );
-    checkCudaErrors( cudaMalloc( ( void ** )&d_outputData, signalSize ) );
-    checkCudaErrors( cudaMalloc( ( void ** )&d_bufferData, signalSize ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), signalSize ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outputData ), signalSize ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_bufferData ), signalSize ) );
 
     // Copy input data to device
-    checkCudaErrors( cudaMemcpy(
-        d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
     POP_RANGE( )
 
     PUSH_RANGE( "CB Params", 3 )
 
     // Create multiplier data
-    cufftComplex *h_multiplier = new cufftComplex[signalSize];
+    T *h_multiplier = new T[signalSize];
 
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_multiplier[index( i, kDataSize, j )] =
-                make_cuComplex( kMultiplier, kMultiplier );
+            h_multiplier[index( i, kDataSize, j )] = make_cuFloatComplex( kMultiplier, kMultiplier );
         }
     }
 
-    cufftComplex *d_multiplier;
+    T *d_multiplier;
 
-    checkCudaErrors( cudaMalloc( ( void ** )&d_multiplier, signalSize ) );
-    checkCudaErrors( cudaMemcpy(
-        d_multiplier, h_multiplier, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), signalSize ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplier, h_multiplier, signalSize, cudaMemcpyHostToDevice ) );
 
     // Create callback parameters
-    cb_inParams<cufftComplex> h_inParams;
+    cb_inParams<T> h_inParams;
     h_inParams.scale      = kScale;
     h_inParams.multiplier = d_multiplier;
 
     // Copy callback parameters to device
-    cb_inParams<cufftComplex> *d_inParams;
+    cb_inParams<T> *d_inParams;
 
-    checkCudaErrors( cudaMalloc( ( void ** )&d_inParams,
-                                 sizeof( cb_inParams<cufftComplex> ) ) );
-    checkCudaErrors( cudaMemcpy( d_inParams,
-                                 &h_inParams,
-                                 sizeof( cb_inParams<cufftComplex> ),
-                                 cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<T> ) ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<T> ), cudaMemcpyHostToDevice ) );
 
-    cb_outParams<cufftComplex> h_outParams;
+    cb_outParams<T> h_outParams;
     h_outParams.scale      = kScale;
     h_outParams.multiplier = d_multiplier;
 
-    cb_outParams<cufftComplex> *d_outParams;
-    checkCudaErrors( cudaMalloc( ( void ** )&d_outParams,
-                                 sizeof( cb_outParams<cufftComplex> ) ) );
-    checkCudaErrors( cudaMemcpy( d_outParams,
-                                 &h_outParams,
-                                 sizeof( cb_outParams<cufftComplex> ),
-                                 cudaMemcpyHostToDevice ) );
+    cb_outParams<T> *d_outParams;
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outParams ), sizeof( cb_outParams<T> ) ) );
+    CUDA_RT_CALL( cudaMemcpy( d_outParams, &h_outParams, sizeof( cb_outParams<T> ), cudaMemcpyHostToDevice ) );
 
     POP_RANGE( )
 
     PUSH_RANGE( "cufftPlanMany", 4 )
-    checkCudaErrors( cufftPlanMany( &fft_forward,
-                                    fftPlan.rank,
-                                    fftPlan.n,
-                                    fftPlan.inembed,
-                                    fftPlan.istride,
-                                    fftPlan.idist,
-                                    fftPlan.onembed,
-                                    fftPlan.ostride,
-                                    fftPlan.odist,
-                                    CUFFT_C2C,
-                                    fftPlan.batch ) );
-    checkCudaErrors( cufftPlanMany( &fft_inverse,
-                                    fftPlan.rank,
-                                    fftPlan.n,
-                                    fftPlan.inembed,
-                                    fftPlan.istride,
-                                    fftPlan.idist,
-                                    fftPlan.onembed,
-                                    fftPlan.ostride,
-                                    fftPlan.odist,
-                                    CUFFT_C2C,
-                                    fftPlan.batch ) );
+    CUDA_RT_CALL( cufftPlanMany( &fft_forward,
+                                 fftPlan.rank,
+                                 fftPlan.n,
+                                 fftPlan.inembed,
+                                 fftPlan.istride,
+                                 fftPlan.idist,
+                                 fftPlan.onembed,
+                                 fftPlan.ostride,
+                                 fftPlan.odist,
+                                 CUFFT_C2C,
+                                 fftPlan.batch ) );
+    CUDA_RT_CALL( cufftPlanMany( &fft_inverse,
+                                 fftPlan.rank,
+                                 fftPlan.n,
+                                 fftPlan.inembed,
+                                 fftPlan.istride,
+                                 fftPlan.idist,
+                                 fftPlan.onembed,
+                                 fftPlan.ostride,
+                                 fftPlan.odist,
+                                 CUFFT_C2C,
+                                 fftPlan.batch ) );
     POP_RANGE( )
 
     PUSH_RANGE( "CB Pointers", 5 )
@@ -385,50 +374,39 @@ void cufftMalloc( T *         h_outputData,
     cufftCallbackStoreC h_storeCallbackPtr;
 
     // Copy device pointers to host
-    checkCudaErrors( cudaMemcpyFromSymbol(
-        &h_loadCallbackPtr, d_loadCallbackPtr, sizeof( h_loadCallbackPtr ) ) );
-    checkCudaErrors( cudaMemcpyFromSymbol( &h_storeCallbackPtr,
-                                           d_storeCallbackPtr,
-                                           sizeof( h_storeCallbackPtr ) ) );
+    CUDA_RT_CALL( cudaMemcpyFromSymbol( &h_loadCallbackPtr, d_loadCallbackPtr, sizeof( h_loadCallbackPtr ) ) );
+    CUDA_RT_CALL( cudaMemcpyFromSymbol( &h_storeCallbackPtr, d_storeCallbackPtr, sizeof( h_storeCallbackPtr ) ) );
     POP_RANGE( )
 
     PUSH_RANGE( "cufftXtSetCallback", 6 )
     // Set input callback
-    checkCudaErrors( cufftXtSetCallback( fft_inverse,
-                                         ( void ** )&h_loadCallbackPtr,
-                                         CUFFT_CB_LD_COMPLEX,
-                                         ( void ** )&d_inParams ) );
+    CUDA_RT_CALL(
+        cufftXtSetCallback( fft_inverse, ( void ** )&h_loadCallbackPtr, CUFFT_CB_LD_COMPLEX, ( void ** )&d_inParams ) );
 
     // Set output callback
-    checkCudaErrors( cufftXtSetCallback( fft_inverse,
-                                         ( void ** )&h_storeCallbackPtr,
-                                         CUFFT_CB_ST_COMPLEX,
-                                         ( void ** )&d_outParams ) );
+    CUDA_RT_CALL( cufftXtSetCallback(
+        fft_inverse, ( void ** )&h_storeCallbackPtr, CUFFT_CB_ST_COMPLEX, ( void ** )&d_outParams ) );
     POP_RANGE( )
 
     PUSH_RANGE( "cufftExecC2C", 7 )
     // Execute FFT plan
-    checkCudaErrors(
-        cufftExecC2C( fft_forward, d_inputData, d_bufferData, CUFFT_FORWARD ) );
+    CUDA_RT_CALL( cufftExecC2C( fft_forward, d_inputData, d_bufferData, CUFFT_FORWARD ) );
 
 #if PRINT
-    checkCudaErrors( cudaDeviceSynchronize( ) );
+    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
     // Copy data from device to host
-    checkCudaErrors( cudaMemcpy(
-        h_outputData, d_bufferData, signalSize, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_bufferData, signalSize, cudaMemcpyDeviceToHost ) );
     printf( "\nPrinting buffer data\n" );
     printFunction( h_outputData );
 #endif
 
-    checkCudaErrors( cufftExecC2C(
-        fft_inverse, d_bufferData, d_outputData, CUFFT_INVERSE ) );
+    CUDA_RT_CALL( cufftExecC2C( fft_inverse, d_bufferData, d_outputData, CUFFT_INVERSE ) );
 
-    checkCudaErrors( cudaDeviceSynchronize( ) );
+    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
     POP_RANGE( )
 
     // Copy data from device to host
-    checkCudaErrors( cudaMemcpy(
-        h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
 #if PRINT
     printf( "\nPrinting output data\n" );
@@ -438,21 +416,19 @@ void cufftMalloc( T *         h_outputData,
     // Cleanup Memory
     delete[]( h_inputData );
     delete[]( h_multiplier );
-    checkCudaErrors( cudaFree( d_inputData ) );
-    checkCudaErrors( cudaFree( d_outputData ) );
-    checkCudaErrors( cudaFree( d_multiplier ) );
+    CUDA_RT_CALL( cudaFree( d_inputData ) );
+    CUDA_RT_CALL( cudaFree( d_outputData ) );
+    CUDA_RT_CALL( cudaFree( d_multiplier ) );
 
     POP_RANGE( )
 }
 
 // cuFFT example using managed memory copies
 template<typename T>
-void useCudaManaged( T *         h_outputData,
-                     const int & signalSize,
-                     fft_params &fftPlan ) {
+void cufftManaged( T *h_outputData, const int &signalSize, fft_params &fftPlan ) {
 
     int device = -1;
-    checkCudaErrors( cudaGetDevice( &device ) );
+    CUDA_RT_CALL( cudaGetDevice( &device ) );
 
     PUSH_RANGE( __FUNCTION__, 1 )
 
@@ -461,23 +437,21 @@ void useCudaManaged( T *         h_outputData,
     cufftHandle fft_inverse;
 
     // Create data arrays
-    cufftComplex *inputData;
-    cufftComplex *outputData;
-    cufftComplex *bufferData;
+    T *inputData;
+    T *outputData;
+    T *bufferData;
 
     PUSH_RANGE( "Prep Input", 2 )
-    checkCudaErrors( cudaMallocManaged( &inputData, signalSize ) );
-    checkCudaErrors( cudaMallocManaged( &outputData, signalSize ) );
-    checkCudaErrors( cudaMallocManaged( &bufferData, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &inputData, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &outputData, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &bufferData, signalSize ) );
 
-    checkCudaErrors(
-        cudaMemPrefetchAsync( inputData, signalSize, cudaCpuDeviceId, 0 ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( inputData, signalSize, cudaCpuDeviceId, 0 ) );
 
     // Create input data
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            inputData[i * kDataSize + j] =
-                make_cuComplex( ( i + j ), ( i - j ) );
+            inputData[i * kDataSize + j] = make_cuComplex( ( i + j ), ( i - j ) );
         }
     }
 
@@ -485,100 +459,88 @@ void useCudaManaged( T *         h_outputData,
 
 #if PRINT
     printf( "\nPrinting input data\n" );
-    printFunction<cufftComplex>( inputData );
+    printFunction<T>( inputData );
 #endif
 
     PUSH_RANGE( "CB Params", 3 )
 
     // Create callback parameters
-    cb_inParams<cufftComplex> *h_inParams;
+    cb_inParams<T> *h_inParams;
 
-    checkCudaErrors(
-        cudaMallocManaged( &h_inParams, sizeof( cb_inParams<cufftComplex> ) ) );
+    CUDA_RT_CALL( cudaMallocManaged( &h_inParams, sizeof( cb_inParams<T> ) ) );
     h_inParams->scale = kScale;
-    checkCudaErrors( cudaMallocManaged( &h_inParams->multiplier, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &h_inParams->multiplier, signalSize ) );
 
     // Create multiplier data
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_inParams->multiplier[index( i, kDataSize, j )] =
-                make_cuComplex( kMultiplier, kMultiplier );
+            h_inParams->multiplier[index( i, kDataSize, j )] = make_cuComplex( kMultiplier, kMultiplier );
         }
     }
 
-    cb_outParams<cufftComplex> *h_outParams;
+    cb_outParams<T> *h_outParams;
 
-    checkCudaErrors( cudaMallocManaged(
-        &h_outParams, sizeof( cb_outParams<cufftComplex> ) ) );
+    CUDA_RT_CALL( cudaMallocManaged( &h_outParams, sizeof( cb_outParams<T> ) ) );
     h_outParams->scale = kScale;
-    checkCudaErrors(
-        cudaMallocManaged( &h_outParams->multiplier, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &h_outParams->multiplier, signalSize ) );
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_outParams->multiplier[index( i, kDataSize, j )] =
-                h_inParams->multiplier[index( i, kDataSize, j )];
+            h_outParams->multiplier[index( i, kDataSize, j )] = h_inParams->multiplier[index( i, kDataSize, j )];
         }
     }
 
     POP_RANGE( )
 
     PUSH_RANGE( "cufftPlanMany", 4 )
-    checkCudaErrors( cufftPlanMany( &fft_forward,
-                                    fftPlan.rank,
-                                    fftPlan.n,
-                                    fftPlan.inembed,
-                                    fftPlan.istride,
-                                    fftPlan.idist,
-                                    fftPlan.onembed,
-                                    fftPlan.ostride,
-                                    fftPlan.odist,
-                                    CUFFT_C2C,
-                                    fftPlan.batch ) );
-    checkCudaErrors( cufftPlanMany( &fft_inverse,
-                                    fftPlan.rank,
-                                    fftPlan.n,
-                                    fftPlan.inembed,
-                                    fftPlan.istride,
-                                    fftPlan.idist,
-                                    fftPlan.onembed,
-                                    fftPlan.ostride,
-                                    fftPlan.odist,
-                                    CUFFT_C2C,
-                                    fftPlan.batch ) );
+    CUDA_RT_CALL( cufftPlanMany( &fft_forward,
+                                 fftPlan.rank,
+                                 fftPlan.n,
+                                 fftPlan.inembed,
+                                 fftPlan.istride,
+                                 fftPlan.idist,
+                                 fftPlan.onembed,
+                                 fftPlan.ostride,
+                                 fftPlan.odist,
+                                 CUFFT_C2C,
+                                 fftPlan.batch ) );
+    CUDA_RT_CALL( cufftPlanMany( &fft_inverse,
+                                 fftPlan.rank,
+                                 fftPlan.n,
+                                 fftPlan.inembed,
+                                 fftPlan.istride,
+                                 fftPlan.idist,
+                                 fftPlan.onembed,
+                                 fftPlan.ostride,
+                                 fftPlan.odist,
+                                 CUFFT_C2C,
+                                 fftPlan.batch ) );
     POP_RANGE( )
 
     PUSH_RANGE( "cufftXtSetCallback", 6 )
     // Set input callback
-    checkCudaErrors( cufftXtSetCallback( fft_inverse,
-                                         ( void ** )&d_loadManagedCallbackPtr,
-                                         CUFFT_CB_LD_COMPLEX,
-                                         ( void ** )&h_inParams ) );
+    CUDA_RT_CALL( cufftXtSetCallback(
+        fft_inverse, ( void ** )&d_loadManagedCallbackPtr, CUFFT_CB_LD_COMPLEX, ( void ** )&h_inParams ) );
 
     // Set output callback
-    checkCudaErrors( cufftXtSetCallback( fft_inverse,
-                                         ( void ** )&d_storeManagedCallbackPtr,
-                                         CUFFT_CB_ST_COMPLEX,
-                                         ( void ** )&h_outParams ) );
+    CUDA_RT_CALL( cufftXtSetCallback(
+        fft_inverse, ( void ** )&d_storeManagedCallbackPtr, CUFFT_CB_ST_COMPLEX, ( void ** )&h_outParams ) );
     POP_RANGE( )
 
     PUSH_RANGE( "cufftExecC2C", 7 )
     // Execute FFT plan
-    checkCudaErrors(
-        cufftExecC2C( fft_forward, inputData, bufferData, CUFFT_FORWARD ) );
+    CUDA_RT_CALL( cufftExecC2C( fft_forward, inputData, bufferData, CUFFT_FORWARD ) );
 
 #if PRINT
-    checkCudaErrors( cudaDeviceSynchronize( ) );
+    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
     // Copy data from device to host
-    checkCudaErrors( cudaMemcpy(
-        h_outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
     printf( "\nPrinting buffer data\n" );
     printFunction( h_outputData );
 #endif
 
-    checkCudaErrors(
-        cufftExecC2C( fft_inverse, bufferData, outputData, CUFFT_INVERSE ) );
+    CUDA_RT_CALL( cufftExecC2C( fft_inverse, bufferData, outputData, CUFFT_INVERSE ) );
 
-    checkCudaErrors( cudaDeviceSynchronize( ) );
+    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
     POP_RANGE( )
 
 #if PRINT
@@ -586,17 +548,16 @@ void useCudaManaged( T *         h_outputData,
     printFunction<cufftComplex>( outputData );
 #endif
 
-    checkCudaErrors( cudaMemcpy(
-        h_outputData, outputData, signalSize, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
     // Cleanup Memory
-    checkCudaErrors( cudaFree( inputData ) );
-    checkCudaErrors( cudaFree( outputData ) );
-    checkCudaErrors( cudaFree( bufferData ) );
-    checkCudaErrors( cudaFree( h_inParams->multiplier ) );
-    checkCudaErrors( cudaFree( h_inParams ) );
-    checkCudaErrors( cudaFree( h_outParams->multiplier ) );
-    checkCudaErrors( cudaFree( h_outParams ) );
+    CUDA_RT_CALL( cudaFree( inputData ) );
+    CUDA_RT_CALL( cudaFree( outputData ) );
+    CUDA_RT_CALL( cudaFree( bufferData ) );
+    CUDA_RT_CALL( cudaFree( h_inParams->multiplier ) );
+    CUDA_RT_CALL( cudaFree( h_inParams ) );
+    CUDA_RT_CALL( cudaFree( h_outParams->multiplier ) );
+    CUDA_RT_CALL( cudaFree( h_outParams ) );
 
     POP_RANGE( )
 }
@@ -611,38 +572,29 @@ void cuFFTDxMalloc( T *h_outputData ) {
     // FFT is defined, its: size, type, direction, precision. Block() operator
     // informs that FFT will be executed on block level. Shared memory is
     // required for co-operation between threads.
-    using FFT =
-        decltype( cufftdx::Block( ) + cufftdx::Size<kDataSize>( ) +
-                  cufftdx::Type<cufftdx::fft_type::c2c>( ) +
-                  cufftdx::Direction<cufftdx::fft_direction::forward>( ) +
-                  cufftdx::Precision<float>( ) +
-                  cufftdx::ElementsPerThread<kElementsPerThread>( ) +
-                  cufftdx::FFTsPerBlock<kBatch>( ) + cufftdx::SM<A>( ) );
+    using FFT = decltype( cufftdx::Block( ) + cufftdx::Size<kDataSize>( ) + cufftdx::Type<cufftdx::fft_type::c2c>( ) +
+                          cufftdx::Direction<cufftdx::fft_direction::forward>( ) + cufftdx::Precision<float>( ) +
+                          cufftdx::ElementsPerThread<kElementsPerThread>( ) + cufftdx::FFTsPerBlock<kBatch>( ) +
+                          cufftdx::SM<A>( ) );
 
-    using IFFT =
-        decltype( cufftdx::Block( ) + cufftdx::Size<kDataSize>( ) +
-                  cufftdx::Type<cufftdx::fft_type::c2c>( ) +
-                  cufftdx::Direction<cufftdx::fft_direction::inverse>( ) +
-                  cufftdx::Precision<float>( ) +
-                  cufftdx::ElementsPerThread<kElementsPerThread>( ) +
-                  cufftdx::FFTsPerBlock<kBatch>( ) + cufftdx::SM<A>( ) );
+    using IFFT = decltype( cufftdx::Block( ) + cufftdx::Size<kDataSize>( ) + cufftdx::Type<cufftdx::fft_type::c2c>( ) +
+                           cufftdx::Direction<cufftdx::fft_direction::inverse>( ) + cufftdx::Precision<float>( ) +
+                           cufftdx::ElementsPerThread<kElementsPerThread>( ) + cufftdx::FFTsPerBlock<kBatch>( ) +
+                           cufftdx::SM<A>( ) );
 
     using complex_type = typename FFT::value_type;
 
     // Allocate managed memory for input/output
-    auto size { FFT::ffts_per_block *
-                cufftdx::size_of<FFT>::value };  // cufftdx::Size<5>() *
-                                                 // cufftdx::FFTsPerBlock<1>()
-    auto sizeBytes { size *
-                     sizeof( complex_type ) };  // Should be same as signalSize
+    auto size { FFT::ffts_per_block * cufftdx::size_of<FFT>::value };  // cufftdx::Size<5>() *
+                                                                       // cufftdx::FFTsPerBlock<1>()
+    auto sizeBytes { size * sizeof( complex_type ) };                  // Should be same as signalSize
 
     complex_type *h_inputData = new complex_type[sizeBytes];
 
     // Create data
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_inputData[index( i, kDataSize, j )] =
-                complex_type { float( i + j ), float( i - j ) };
+            h_inputData[index( i, kDataSize, j )] = complex_type { float( i + j ), float( i - j ) };
         }
     }
 
@@ -656,13 +608,12 @@ void cuFFTDxMalloc( T *h_outputData ) {
     complex_type *d_outputData;
     complex_type *d_bufferData;
 
-    checkCudaErrors( cudaMalloc( ( void ** )&d_inputData, sizeBytes ) );
-    checkCudaErrors( cudaMalloc( ( void ** )&d_outputData, sizeBytes ) );
-    checkCudaErrors( cudaMalloc( ( void ** )&d_bufferData, sizeBytes ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), sizeBytes ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outputData ), sizeBytes ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_bufferData ), sizeBytes ) );
 
     // Copy input data to device
-    checkCudaErrors( cudaMemcpy(
-        d_inputData, h_inputData, sizeBytes, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, sizeBytes, cudaMemcpyHostToDevice ) );
 
     POP_RANGE( )
 
@@ -673,16 +624,14 @@ void cuFFTDxMalloc( T *h_outputData ) {
 
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_multiplier[index( i, kDataSize, j )] =
-                complex_type { kMultiplier, kMultiplier };
+            h_multiplier[index( i, kDataSize, j )] = complex_type { kMultiplier, kMultiplier };
         }
     }
 
     complex_type *d_multiplier;
 
-    checkCudaErrors( cudaMalloc( ( void ** )&d_multiplier, sizeBytes ) );
-    checkCudaErrors( cudaMemcpy(
-        d_multiplier, h_multiplier, sizeBytes, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), sizeBytes ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplier, h_multiplier, sizeBytes, cudaMemcpyHostToDevice ) );
 
     // Create callback parameters
     cb_inParams<complex_type> h_inParams;
@@ -692,54 +641,43 @@ void cuFFTDxMalloc( T *h_outputData ) {
     // Copy callback parameters to device
     cb_inParams<complex_type> *d_inParams;
 
-    checkCudaErrors( cudaMalloc( ( void ** )&d_inParams,
-                                 sizeof( cb_inParams<complex_type> ) ) );
-    checkCudaErrors( cudaMemcpy( d_inParams,
-                                 &h_inParams,
-                                 sizeof( cb_inParams<complex_type> ),
-                                 cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<complex_type> ) ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<complex_type> ), cudaMemcpyHostToDevice ) );
 
     cb_outParams<complex_type> h_outParams;
     h_outParams.scale      = kScale;
     h_outParams.multiplier = d_multiplier;
 
     cb_outParams<complex_type> *d_outParams;
-    checkCudaErrors( cudaMalloc( ( void ** )&d_outParams,
-                                 sizeof( cb_outParams<complex_type> ) ) );
-    checkCudaErrors( cudaMemcpy( d_outParams,
-                                 &h_outParams,
-                                 sizeof( cb_outParams<complex_type> ),
-                                 cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outParams ), sizeof( cb_outParams<complex_type> ) ) );
+    CUDA_RT_CALL(
+        cudaMemcpy( d_outParams, &h_outParams, sizeof( cb_outParams<complex_type> ), cudaMemcpyHostToDevice ) );
 
     POP_RANGE( )
 
     PUSH_RANGE( "cufftExecC2C", 7 )
 
     // Invokes kernel with FFT::block_dim threads in CUDA block
-    block_fft_kernel<FFT><<<1, FFT::block_dim, FFT::shared_memory_size>>>(
-        d_inputData, d_bufferData );
-    checkCudaErrors( cudaPeekAtLastError( ) );
+    block_fft_kernel<FFT><<<1, FFT::block_dim, FFT::shared_memory_size>>>( d_inputData, d_bufferData );
+    CUDA_RT_CALL( cudaPeekAtLastError( ) );
 
 #if PRINT
     // Copy data from device to host
-    checkCudaErrors( cudaDeviceSynchronize( ) );
-    checkCudaErrors( cudaMemcpy(
-        h_outputData, d_bufferData, sizeBytes, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_bufferData, sizeBytes, cudaMemcpyDeviceToHost ) );
     printf( "\nPrinting buffer data\n" );
     printFunction( h_outputData );
 #endif
 
     block_ifft_kernel<IFFT, complex_type>
-        <<<1, FFT::block_dim, FFT::shared_memory_size>>>(
-            d_bufferData, d_outputData, d_inParams, d_outParams );
-    checkCudaErrors( cudaPeekAtLastError( ) );
-    checkCudaErrors( cudaDeviceSynchronize( ) );
+        <<<1, FFT::block_dim, FFT::shared_memory_size>>>( d_bufferData, d_outputData, d_inParams, d_outParams );
+    CUDA_RT_CALL( cudaPeekAtLastError( ) );
+    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
 
     POP_RANGE( )
 
     // Copy data from device to host
-    checkCudaErrors( cudaMemcpy(
-        h_outputData, d_outputData, sizeBytes, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, sizeBytes, cudaMemcpyDeviceToHost ) );
 
 #if PRINT
     printf( "\nPrinting output data\n" );
@@ -747,9 +685,9 @@ void cuFFTDxMalloc( T *h_outputData ) {
 #endif
 
     // Cleanup Memory
-    free( h_inputData );
-    checkCudaErrors( cudaFree( d_inputData ) );
-    checkCudaErrors( cudaFree( d_outputData ) );
+    delete[]( h_inputData );
+    CUDA_RT_CALL( cudaFree( d_inputData ) );
+    CUDA_RT_CALL( cudaFree( d_outputData ) );
 
     POP_RANGE( )
 }
@@ -757,13 +695,12 @@ void cuFFTDxMalloc( T *h_outputData ) {
 // Returns CUDA device compute capability
 uint get_cuda_device_arch( ) {
     int device;
-    checkCudaErrors( cudaGetDevice( &device ) );
+    CUDA_RT_CALL( cudaGetDevice( &device ) );
 
     cudaDeviceProp props;
-    checkCudaErrors( cudaGetDeviceProperties( &props, device ) );
+    CUDA_RT_CALL( cudaGetDeviceProperties( &props, device ) );
 
-    return ( static_cast<uint>( props.major ) * 100 +
-             static_cast<unsigned>( props.minor ) * 10 );
+    return ( static_cast<uint>( props.major ) * 100 + static_cast<uint>( props.minor ) * 10 );
 }
 
 int main( int argc, char **argv ) {
@@ -772,30 +709,29 @@ int main( int argc, char **argv ) {
     const size_t signalSize { sizeof( cufftComplex ) * kDataSize * kBatch };
 
     // Set fft plan parameters
-    fft_params fftPlan { kRank,     { kDataSize }, 1,     1,     kDataSize,
-                         kDataSize, { 0 },         { 0 }, kBatch };
+    fft_params fftPlan { kRank, { kDataSize }, 1, 1, kDataSize, kDataSize, { 0 }, { 0 }, kBatch };
 
-    cuFloatComplex *cufftHostData        = new cuFloatComplex[signalSize];
-    cuFloatComplex *cufftManagedHostData = new cuFloatComplex[signalSize];
-    cuFloatComplex *cufftDxHostData      = new cuFloatComplex[signalSize];
+    cufftComplex *cufftHostData        = new cufftComplex[signalSize];
+    cufftComplex *cufftManagedHostData = new cufftComplex[signalSize];
+    cufftComplex *cufftDxHostData      = new cufftComplex[signalSize];
 
     // Warm-up GPU
     warmUpFunction( );
 
     // Run basic cuFFT example with callbacks
-    cufftMalloc<cuFloatComplex>( cufftHostData, signalSize, fftPlan );
+    cufftMalloc<cufftComplex>( cufftHostData, signalSize, fftPlan );
 
 #if PRINT
     printf( "\nPrinting cufftHostData data\n" );
     printFunction( cufftHostData );
 #endif
 
-    useCudaManaged<cuFloatComplex>( cufftManagedHostData, signalSize, fftPlan );
+    cufftManaged<cufftComplex>( cufftManagedHostData, signalSize, fftPlan );
 
-// #if PRINT
-//     printf( "\nPrinting cufftManagedHostData data\n" );
-//     printFunction( cufftManagedHostData );
-// #endif
+#if PRINT
+    printf( "\nPrinting cufftManagedHostData data\n" );
+    printFunction( cufftManagedHostData );
+#endif
 
     // Verify cuFFT (cudaMalloc vs cudaManagedMalloc) have the same results
     printf( "Compare cuFFT (cudaMalloc vs cudaMallocManaged)\n" );
@@ -807,7 +743,7 @@ int main( int argc, char **argv ) {
     // Run cuFFTDx example to replicate cuFFT functionality
     switch ( arch ) {
     case 750:
-        cuFFTDxMalloc<750, cuFloatComplex>( cufftDxHostData );
+        cuFFTDxMalloc<750, cufftComplex>( cufftDxHostData );
 #if PRINT
         printf( "\nPrinting cufftDxHostData data\n" );
         printFunction( cufftDxHostData );
@@ -823,5 +759,8 @@ int main( int argc, char **argv ) {
     printf( "Compare cuFFT and cuFFTDx (cudaMalloc)\n" );
     verifyResults( cufftHostData, cufftDxHostData, signalSize );
 
-    checkCudaErrors( cudaDeviceReset( ) );
+    delete[]( cufftHostData );
+    delete[]( cufftManagedHostData );
+    delete[]( cufftDxHostData );
+    CUDA_RT_CALL( cudaDeviceReset( ) );
 }
