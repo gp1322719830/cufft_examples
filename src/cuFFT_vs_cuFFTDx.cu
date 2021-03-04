@@ -13,7 +13,8 @@ void warmUpFunction( ) {
 
     using namespace thrust::placeholders;
 
-    int                        N = 1 << 20;
+    int N = 1 << 20;
+
     thrust::device_vector<int> d_x( N, 2 );  // alloc and copy host to device
     thrust::device_vector<int> d_y( N, 4 );
 

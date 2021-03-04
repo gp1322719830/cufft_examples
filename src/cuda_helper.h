@@ -48,7 +48,7 @@ const int      num_colors = sizeof( colors ) / sizeof( uint32_t );
 #endif
 // ***************** FOR NVTX MARKERS *******************
 
-constexpr int   kDataSize { 32 };
+constexpr int   kDataSize { 4096 };
 constexpr int   kBatch { 1 };
 constexpr int   kRank { 1 };
 constexpr int   kElementsPerThread { 8 };

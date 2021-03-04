@@ -1,7 +1,7 @@
 NVCC	:=nvcc -ccbin g++
 CFLAGS	:=-O3 -std=c++17
 ARCHES	:=-gencode arch=compute_75,code=\"compute_75,sm_75\"
-INC_DIR	:=-I/usr/local/cuda/include/cufftdx/include
+INC_DIR	:=-I/home/belt/workStuff/cufft/libcufftdx/include
 LIB_DIR	:=
 LIBS	:=-lcufft_static -lculibos
 SRCDIR	:=./src
