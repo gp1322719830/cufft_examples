@@ -49,12 +49,13 @@ const int      num_colors = sizeof( colors ) / sizeof( uint32_t );
 // ***************** FOR NVTX MARKERS *******************
 
 constexpr int   kDataSize { 4096 };
-constexpr int   kBatch { 1 };
+constexpr int   kFFTperBlock { 1 };
+constexpr int   kBatch { 65536 };
 constexpr int   kRank { 1 };
 constexpr int   kElementsPerThread { 8 };
 constexpr float kScale { 1.0f };
 constexpr float kMultiplier { 1.0f };
-constexpr float kTolerance { 1e-3f };  // Compare cuFFT / cuFFTDx results
+constexpr float kTolerance { 1e-2f };  // Compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {
     return ( i * j + k );
@@ -139,14 +140,14 @@ void printFunction( std::string const str, T *const data ) {}
 // ******************* FOR PRINTING *********************
 
 template<typename T>
-void verifyResults( T const *ref, T const *alt, const int &signalSize ) {
+void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
 
     float2 *relError = new float2[signalSize];
     int     counter {};
 
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            int idx         = index( i, kDataSize, j );
+            size_t idx         = index( i, kDataSize, j );
             relError[idx].x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
             relError[idx].y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
 

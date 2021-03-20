@@ -1,3 +1,5 @@
+#include <random>
+
 #include <cufft.h>
 #include <cufftXt.h>
 
@@ -9,7 +11,7 @@ __device__ cufftCallbackStoreC d_storeCallbackPtr = CB_MulAndScaleOutputC;
 
 // cuFFT example using explicit memory copies
 template<typename T>
-void cufftMalloc( T *h_outputData, const int &signalSize, fft_params &fftPlan ) {
+void cufftMalloc( T *h_outputData, const size_t &signalSize, fft_params &fftPlan ) {
 
     PUSH_RANGE( __FUNCTION__, 1 )
 
@@ -27,9 +29,12 @@ void cufftMalloc( T *h_outputData, const int &signalSize, fft_params &fftPlan ) 
 
     PUSH_RANGE( "Prep Input", 2 )
     // Create input data
+    std::mt19937 eng;
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            h_inputData[index( i, kDataSize, j )] = make_cuComplex( ( i + j ), ( i - j ) );
+            float temp { dist(eng) };
+            h_inputData[index( i, kDataSize, j )] = make_cuComplex( temp, -temp );
         }
     }
 
@@ -92,6 +97,7 @@ void cufftMalloc( T *h_outputData, const int &signalSize, fft_params &fftPlan ) 
                                  fftPlan.odist,
                                  CUFFT_C2C,
                                  fftPlan.batch ) );
+
     CUDA_RT_CALL( cufftPlanMany( &fft_inverse,
                                  fftPlan.rank,
                                  fftPlan.n,
@@ -125,19 +131,13 @@ void cufftMalloc( T *h_outputData, const int &signalSize, fft_params &fftPlan ) 
         fft_inverse, ( void ** )&h_storeCallbackPtr, CUFFT_CB_ST_COMPLEX, ( void ** )&d_outParams ) );
     POP_RANGE( )
 
-    PUSH_RANGE( "cufftExecC2C - FFT", 7 )
     // Execute FFT plan
-    CUDA_RT_CALL( cufftExecC2C( fft_forward, d_inputData, d_bufferData, CUFFT_FORWARD ) );
-	CUDA_RT_CALL( cudaDeviceSynchronize( ) );
-    POP_RANGE( )
-
-    // Copy data from device to host
-    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_bufferData, signalSize, cudaMemcpyDeviceToHost ) );
-    printFunction<T>( "Printing buffer data", h_outputData );
-
-	PUSH_RANGE( "cufftExecC2C - IFFT", 8 )
-    CUDA_RT_CALL( cufftExecC2C( fft_inverse, d_bufferData, d_outputData, CUFFT_INVERSE ) );
-    CUDA_RT_CALL( cudaDeviceSynchronize( ) );
+    for (int i = 0; i < 1024; i++) {
+        PUSH_RANGE( "cufftExecC2C - FFT/IFFT - Malloc", 7 )
+        CUDA_RT_CALL( cufftExecC2C( fft_forward, d_inputData, d_bufferData, CUFFT_FORWARD ) );
+        CUDA_RT_CALL( cufftExecC2C( fft_inverse, d_bufferData, d_outputData, CUFFT_INVERSE ) );
+        CUDA_RT_CALL( cudaDeviceSynchronize( ) );
+    }
     POP_RANGE( )
 
     // Copy data from device to host

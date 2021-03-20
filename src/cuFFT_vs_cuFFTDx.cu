@@ -19,7 +19,8 @@ void warmUpFunction( ) {
     thrust::device_vector<int> d_y( N, 4 );
 
     // Perform SAXPY on 1M elements
-    thrust::transform( d_x.begin( ), d_x.end( ), d_y.begin( ), d_y.begin( ), 2.0f * _1 + _2 );
+    for (int i = 0; i < 1024; i++)
+        thrust::transform( d_x.begin( ), d_x.end( ), d_y.begin( ), d_y.begin( ), 2.0f * _1 + _2 );
 }
 
 // Returns CUDA device compute capability
@@ -52,16 +53,16 @@ int main( int argc, char **argv ) {
     printf("Running cufftMalloc\n");
     cufftMalloc<cufftComplex>( cufftHostData, signalSize, fftPlan );
 
-    printFunction( "Printing cufftHostData data", cufftHostData );
+    // printFunction( "Printing cufftHostData data", cufftHostData );
 
-    printf("Running cufftManaged\n");
-    cufftManaged<cufftComplex>( cufftManagedHostData, signalSize, fftPlan );
+    // printf("Running cufftManaged\n");
+    // cufftManaged<cufftComplex>( cufftManagedHostData, signalSize, fftPlan );
 
-    printFunction( "Printing cufftManagedHostData data", cufftManagedHostData );
+    // printFunction( "Printing cufftManagedHostData data", cufftManagedHostData );
 
     // Verify cuFFT (cudaMalloc vs cudaManagedMalloc) have the same results
-    printf( "Compare cuFFT (cudaMalloc vs cudaMallocManaged)\n" );
-    verifyResults( cufftHostData, cufftManagedHostData, signalSize );
+    // printf( "Compare cuFFT (cudaMalloc vs cudaMallocManaged)\n" );
+    // verifyResults( cufftHostData, cufftManagedHostData, signalSize );
 
     // Retrieve GPU architecture
     const uint arch { get_cuda_device_arch( ) };
@@ -80,11 +81,12 @@ int main( int argc, char **argv ) {
     }
 
     // Verify cuFFT and cuFFTDx have the same results
-    printf( "Compare cuFFT and cuFFTDx (cudaMalloc)\n" );
-    verifyResults( cufftHostData, cufftDxHostData, signalSize );
+    // printf( "Compare cuFFT and cuFFTDx (cudaMalloc)\n" );
+    // verifyResults( cufftHostData, cufftDxHostData, signalSize );
 
     delete[]( cufftHostData );
     delete[]( cufftManagedHostData );
     delete[]( cufftDxHostData );
+
     CUDA_RT_CALL( cudaDeviceReset( ) );
 }

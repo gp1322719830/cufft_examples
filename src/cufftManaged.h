@@ -1,3 +1,5 @@
+#include <random>
+
 #include <cufft.h>
 #include <cufftXt.h>
 
@@ -9,7 +11,7 @@ __device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr = CB_MulAnd
 
 // cuFFT example using managed memory copies
 template<typename T>
-void cufftManaged( T *h_outputData, const int &signalSize, fft_params &fftPlan ) {
+void cufftManaged( T *h_outputData, const size_t &signalSize, fft_params &fftPlan ) {
 
     int device = -1;
     CUDA_RT_CALL( cudaGetDevice( &device ) );
@@ -33,9 +35,12 @@ void cufftManaged( T *h_outputData, const int &signalSize, fft_params &fftPlan )
     CUDA_RT_CALL( cudaMemPrefetchAsync( inputData, signalSize, cudaCpuDeviceId, 0 ) );
 
     // Create input data
+    std::mt19937 eng;
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
     for ( int i = 0; i < kBatch; i++ ) {
         for ( int j = 0; j < kDataSize; j++ ) {
-            inputData[i * kDataSize + j] = make_cuComplex( ( i + j ), ( i - j ) );
+            float temp { dist(eng) };
+            inputData[i * kDataSize + j] = make_cuComplex( temp, -temp );
         }
     }
 
@@ -107,17 +112,17 @@ void cufftManaged( T *h_outputData, const int &signalSize, fft_params &fftPlan )
         fft_inverse, ( void ** )&d_storeManagedCallbackPtr, CUFFT_CB_ST_COMPLEX, ( void ** )&h_outParams ) );
     POP_RANGE( )
 
-    PUSH_RANGE( "cufftExecC2C - FFT", 7 )
+    PUSH_RANGE( "cufftExecC2C - FFT/IFFT - Managed", 7 )
     // Execute FFT plan
     CUDA_RT_CALL( cufftExecC2C( fft_forward, inputData, bufferData, CUFFT_FORWARD ) );
-	CUDA_RT_CALL( cudaDeviceSynchronize( ) );
-    POP_RANGE( )
+	// CUDA_RT_CALL( cudaDeviceSynchronize( ) );
+    // POP_RANGE( )
 
     // Copy data from device to host
-    CUDA_RT_CALL( cudaMemcpy( h_outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
-    printFunction<T>( "Printing buffer data", h_outputData );
+    // CUDA_RT_CALL( cudaMemcpy( h_outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
+    // printFunction<T>( "Printing buffer data", h_outputData );
 
-	PUSH_RANGE( "cufftExecC2C - IFFT", 8 )
+	// PUSH_RANGE( "cufftExecC2C - IFFT - Managed", 8 )
     CUDA_RT_CALL( cufftExecC2C( fft_inverse, bufferData, outputData, CUFFT_INVERSE ) );
     CUDA_RT_CALL( cudaDeviceSynchronize( ) );
     POP_RANGE( )
