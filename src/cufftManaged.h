@@ -10,7 +10,7 @@ __device__ __managed__ cufftCallbackLoadC d_loadManagedCallbackPtr   = CB_MulAnd
 __device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr = CB_MulAndScaleOutputC;
 
 // cuFFT example using managed memory copies
-template<typename T>
+template<typename T, uint SIZE, uint BATCH>
 void cufftManaged( T *h_outputData, const size_t &signalSize, fft_params &fftPlan ) {
 
     int device = -1;
@@ -37,16 +37,14 @@ void cufftManaged( T *h_outputData, const size_t &signalSize, fft_params &fftPla
     // Create input data
     std::mt19937 eng;
     std::uniform_real_distribution<float> dist(0.0f, 10.0f);
-    for ( int i = 0; i < kBatch; i++ ) {
-        for ( int j = 0; j < kDataSize; j++ ) {
+    for ( int i = 0; i < BATCH; i++ ) {
+        for ( int j = 0; j < SIZE; j++ ) {
             float temp { dist(eng) };
-            inputData[i * kDataSize + j] = make_cuComplex( temp, -temp );
+            inputData[i * SIZE + j] = make_cuComplex( temp, -temp );
         }
     }
 
     POP_RANGE( )
-
-    printFunction<T>( "Printing input data", inputData );
 
     PUSH_RANGE( "CB Params", 3 )
 
@@ -58,9 +56,9 @@ void cufftManaged( T *h_outputData, const size_t &signalSize, fft_params &fftPla
     CUDA_RT_CALL( cudaMallocManaged( &h_inParams->multiplier, signalSize ) );
 
     // Create multiplier data
-    for ( int i = 0; i < kBatch; i++ ) {
-        for ( int j = 0; j < kDataSize; j++ ) {
-            h_inParams->multiplier[index( i, kDataSize, j )] = make_cuComplex( kMultiplier, kMultiplier );
+    for ( int i = 0; i < BATCH; i++ ) {
+        for ( int j = 0; j < SIZE; j++ ) {
+            h_inParams->multiplier[index( i, SIZE, j )] = make_cuComplex( kMultiplier, kMultiplier );
         }
     }
 
@@ -69,9 +67,9 @@ void cufftManaged( T *h_outputData, const size_t &signalSize, fft_params &fftPla
     CUDA_RT_CALL( cudaMallocManaged( &h_outParams, sizeof( cb_outParams<T> ) ) );
     h_outParams->scale = kScale;
     CUDA_RT_CALL( cudaMallocManaged( &h_outParams->multiplier, signalSize ) );
-    for ( int i = 0; i < kBatch; i++ ) {
-        for ( int j = 0; j < kDataSize; j++ ) {
-            h_outParams->multiplier[index( i, kDataSize, j )] = h_inParams->multiplier[index( i, kDataSize, j )];
+    for ( int i = 0; i < BATCH; i++ ) {
+        for ( int j = 0; j < SIZE; j++ ) {
+            h_outParams->multiplier[index( i, SIZE, j )] = h_inParams->multiplier[index( i, SIZE, j )];
         }
     }
 
@@ -115,19 +113,9 @@ void cufftManaged( T *h_outputData, const size_t &signalSize, fft_params &fftPla
     PUSH_RANGE( "cufftExecC2C - FFT/IFFT - Managed", 7 )
     // Execute FFT plan
     CUDA_RT_CALL( cufftExecC2C( fft_forward, inputData, bufferData, CUFFT_FORWARD ) );
-	// CUDA_RT_CALL( cudaDeviceSynchronize( ) );
-    // POP_RANGE( )
-
-    // Copy data from device to host
-    // CUDA_RT_CALL( cudaMemcpy( h_outputData, bufferData, signalSize, cudaMemcpyDeviceToHost ) );
-    // printFunction<T>( "Printing buffer data", h_outputData );
-
-	// PUSH_RANGE( "cufftExecC2C - IFFT - Managed", 8 )
     CUDA_RT_CALL( cufftExecC2C( fft_inverse, bufferData, outputData, CUFFT_INVERSE ) );
     CUDA_RT_CALL( cudaDeviceSynchronize( ) );
     POP_RANGE( )
-
-    printFunction<T>( "Printing output data", outputData );
 
     CUDA_RT_CALL( cudaMemcpy( h_outputData, outputData, signalSize, cudaMemcpyDeviceToHost ) );
 

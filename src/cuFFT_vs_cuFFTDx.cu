@@ -34,45 +34,61 @@ uint get_cuda_device_arch( ) {
     return ( static_cast<uint>( props.major ) * 100 + static_cast<uint>( props.minor ) * 10 );
 }
 
-int main( int argc, char **argv ) {
-
+template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
+void benchmark() {
     // Calculate size of signal array to process
-    const size_t signalSize { sizeof( cufftComplex ) * kDataSize * kBatch };
+    const size_t signalSize { sizeof( cufftComplex ) * SIZE * BATCH };
 
     // Set fft plan parameters
-    fft_params fftPlan { kRank, { kDataSize }, 1, 1, kDataSize, kDataSize, { 0 }, { 0 }, kBatch };
+    fft_params fftPlan { kRank, { SIZE }, 1, 1, SIZE, SIZE, { 0 }, { 0 }, BATCH };
 
     cufftComplex *cufftHostData        = new cufftComplex[signalSize];
     cufftComplex *cufftManagedHostData = new cufftComplex[signalSize];
     cufftComplex *cufftDxHostData      = new cufftComplex[signalSize];
 
-    // Warm-up GPU
-    warmUpFunction( );
+    // float *h_inputData = new complex_type[sizeBytes * 2];
+    // std::mt19937 eng;
+    // std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    // for ( int i = 0; i < BATCH; i++ ) {
+    //     for ( int j = 0; j < SIZE; j++ ) {
+    //         float temp { dist(eng) };
+    //         h_inputData[index( i, SIZE, j )] = complex_type { temp, -temp };
+    //     }
+    // }
 
-    // Run basic cuFFT example with callbacks
     printf("Running cufftMalloc\n");
-    cufftMalloc<cufftComplex>( cufftHostData, signalSize, fftPlan );
+    cufftMalloc<cufftComplex, SIZE, BATCH>( cufftHostData, signalSize, fftPlan );
 
-    // printFunction( "Printing cufftHostData data", cufftHostData );
+    printf("Running cufftdxMalloc\n");
+    cufftdxMalloc<ARCH, cufftComplex, SIZE, BATCH, FPB, EPT>( cufftDxHostData );
 
-    // printf("Running cufftManaged\n");
-    // cufftManaged<cufftComplex>( cufftManagedHostData, signalSize, fftPlan );
+    // Verify cuFFT and cuFFTDx have the same results
+    printf( "Compare cuFFT and cuFFTDx (cudaMalloc)\n" );
+    // verifyResults<cufftComplex, SIZE, BATCH>( cufftHostData, cufftDxHostData, signalSize );
 
-    // printFunction( "Printing cufftManagedHostData data", cufftManagedHostData );
+    delete[]( cufftHostData );
+    delete[]( cufftManagedHostData );
+    delete[]( cufftDxHostData );
+}
 
-    // Verify cuFFT (cudaMalloc vs cudaManagedMalloc) have the same results
-    // printf( "Compare cuFFT (cudaMalloc vs cudaMallocManaged)\n" );
-    // verifyResults( cufftHostData, cufftManagedHostData, signalSize );
+int main( int argc, char **argv ) {
 
     // Retrieve GPU architecture
     const uint arch { get_cuda_device_arch( ) };
 
-    // Run cuFFTDx example to replicate cuFFT functionality
-    printf("Running cufftdxMalloc\n");
+    // Warm-up GPU
+    warmUpFunction( );
+
     switch ( arch ) {
+        // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
+    case 700:
+        benchmark<700, 16384, 4096, 1, 32>();
+        break;
     case 750:
-        cufftdxMalloc<750, cufftComplex>( cufftDxHostData );
-        printFunction( "Printing cufftDxHostData data", cufftDxHostData );
+        benchmark<750, 4096, 4096, 1, 32>();
+        break;
+    case 800:
+        benchmark<800, 32768, 4096, 1, 32>();
         break;
     default:
         printf( "GPU architecture must be 7.0 or greater to use cuFFTDx\n "
@@ -80,13 +96,7 @@ int main( int argc, char **argv ) {
         break;
     }
 
-    // Verify cuFFT and cuFFTDx have the same results
-    // printf( "Compare cuFFT and cuFFTDx (cudaMalloc)\n" );
-    // verifyResults( cufftHostData, cufftDxHostData, signalSize );
 
-    delete[]( cufftHostData );
-    delete[]( cufftManagedHostData );
-    delete[]( cufftDxHostData );
 
     CUDA_RT_CALL( cudaDeviceReset( ) );
 }

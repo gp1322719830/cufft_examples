@@ -1,6 +1,6 @@
 #pragma once
 
-
+#include <cuda.h>
 
 // *************** FOR ERROR CHECKING *******************
 #ifndef CUDA_RT_CALL
@@ -48,11 +48,8 @@ const int      num_colors = sizeof( colors ) / sizeof( uint32_t );
 #endif
 // ***************** FOR NVTX MARKERS *******************
 
-constexpr int   kDataSize { 4096 };
-constexpr int   kFFTperBlock { 1 };
-constexpr int   kBatch { 65536 };
+constexpr int   kLoops { 1024 };
 constexpr int   kRank { 1 };
-constexpr int   kElementsPerThread { 8 };
 constexpr float kScale { 1.0f };
 constexpr float kMultiplier { 1.0f };
 constexpr float kTolerance { 1e-2f };  // Compare cuFFT / cuFFTDx results
@@ -120,34 +117,17 @@ __device__ void CB_MulAndScaleOutputC( void *dataOut, size_t offset, T element, 
         ComplexScale( ComplexMul( element, ( params->multiplier )[offset] ), params->scale );
 }
 
-// ******************* FOR PRINTING *********************
-#ifdef PRINT
-#include <cstring>
-
-template<typename T>
-void printFunction( std::string const str, T *const data ) {
-    printf( "\n%s\n", str.c_str() );
-    for ( int i = 0; i < kBatch; i++ ) {
-        for ( int j = 0; j < kDataSize; j++ ) {
-            printf( "Re = %0.6f; Im = %0.6f\n", data[index( i, kDataSize, j )].x, data[index( i, kDataSize, j )].y );
-        }
-    }
-}
-#else
-template<typename T>
-void printFunction( std::string const str, T *const data ) {}
-#endif
-// ******************* FOR PRINTING *********************
-
-template<typename T>
+template<typename T, uint SIZE, uint BATCH>
 void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
+
+    printf("SIZE %d %d\n", SIZE, BATCH);
 
     float2 *relError = new float2[signalSize];
     int     counter {};
 
-    for ( int i = 0; i < kBatch; i++ ) {
-        for ( int j = 0; j < kDataSize; j++ ) {
-            size_t idx         = index( i, kDataSize, j );
+    for ( int i = 0; i < BATCH; i++ ) {
+        for ( int j = 0; j < SIZE; j++ ) {
+            size_t idx         = index( i, SIZE, j );
             relError[idx].x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
             relError[idx].y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
 
