@@ -14,44 +14,45 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
                                 cb_outParams<T> *          outParams ) {
 
     using complex_type = typename FFT::value_type;
+    using scalar_type  = typename complex_type::value_type;
 
     extern __shared__ complex_type shared_mem[];
 
     // Local array and copy data into it
     complex_type thread_data[FFT::storage_size];
+    complex_type temp_mult[FFT::storage_size];
+    scalar_type temp_scale {};
 
     // ID of FFT in CUDA block, in range [0; FFT::ffts_per_block)
     const unsigned int local_fft_id { threadIdx.y };
 
     // Load data from global memory to registers
     example::io<FFT>::load( inputData, thread_data, local_fft_id );
+    temp_scale = inParams->scale;
 
     // Execute FFT
     FFT( ).execute( thread_data, shared_mem );
 
-    // Execute input callback functionality
-    uint offset = example::io<FFT>::batch_offset( local_fft_id );
-    uint stride = example::io<FFT>::stride_size( );
+    example::io<FFT>::load( inParams->multiplier, temp_mult, local_fft_id );
 
-    uint       index  = offset + threadIdx.x;
+#pragma unroll FFT::elements_per_thread
     for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-        thread_data[i] = ComplexScale( ComplexMul( thread_data[i], ( inParams->multiplier )[index] ), inParams->scale );
-        index += stride;
+        thread_data[i] = ComplexMul( thread_data[i], temp_mult[i] );
+        thread_data[i] = ComplexScale( thread_data[i], temp_scale );
     }
 
     // Execute FFT
     IFFT( ).execute( thread_data, shared_mem );
 
-    // Execute output callback functionality
-    offset = example::io<IFFT>::batch_offset( local_fft_id );
-    stride = example::io<IFFT>::stride_size( );
-    index = offset + threadIdx.x;
+    example::io<FFT>::load( outParams->multiplier, temp_mult, local_fft_id );
+    temp_scale = outParams->scale;
 
-    for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
-        thread_data[i] =
-            ComplexScale( ComplexMul( thread_data[i], ( outParams->multiplier )[index] ), outParams->scale );
-        index += stride;
+#pragma unroll FFT::elements_per_thread
+    for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
+        thread_data[i] = ComplexMul( thread_data[i], temp_mult[i] );
+        thread_data[i] = ComplexScale( thread_data[i], temp_scale );
     }
+
 
     // Save results
     example::io<IFFT>::store( thread_data, outputData, local_fft_id );
@@ -82,11 +83,9 @@ void cufftdxMalloc( T *h_outputData ) {
     CUDA_RT_CALL( cudaFuncSetAttribute ( block_fft_ifft_kernel<FFT, IFFT, complex_type>, cudaFuncAttributeMaxDynamicSharedMemorySize, FFT::shared_memory_size ) );
 
     // Allocate managed memory for input/output
-    auto size { cufftdx::size_of<FFT>::value * BATCH };  // cufftdx::Size<5>() *
-                                                                       // cufftdx::FFTsPerBlock<1>()
-    auto sizeBytes { size * sizeof( complex_type ) };                  // Should be same as signalSize
+    const size_t signalSize  { sizeof( complex_type ) * cufftdx::size_of<FFT>::value * BATCH };
 
-    complex_type *h_inputData = new complex_type[sizeBytes];
+    complex_type *h_inputData = new complex_type[signalSize];
 
     // // Create data
     std::mt19937 eng;
@@ -102,18 +101,18 @@ void cufftdxMalloc( T *h_outputData ) {
     complex_type *d_inputData;
     complex_type *d_outputData;
 
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), sizeBytes ) );
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outputData ), sizeBytes ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), signalSize ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outputData ), signalSize ) );
 
     // Copy input data to device
-    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, sizeBytes, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
 
     POP_RANGE( )
 
     PUSH_RANGE( "CB Params", 3 )
 
     // Create multiplier data
-    complex_type *h_multiplier = new complex_type[sizeBytes];
+    complex_type *h_multiplier = new complex_type[signalSize];
 
     for ( int i = 0; i < BATCH; i++ ) {
         for ( int j = 0; j < SIZE; j++ ) {
@@ -123,8 +122,8 @@ void cufftdxMalloc( T *h_outputData ) {
 
     complex_type *d_multiplier;
 
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), sizeBytes ) );
-    CUDA_RT_CALL( cudaMemcpy( d_multiplier, h_multiplier, sizeBytes, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), signalSize ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplier, h_multiplier, signalSize, cudaMemcpyHostToDevice ) );
 
     // Create callback parameters
     cb_inParams<complex_type> h_inParams;
@@ -162,7 +161,7 @@ void cufftdxMalloc( T *h_outputData ) {
     POP_RANGE( )
 
     // Copy data from device to host
-    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, sizeBytes, cudaMemcpyDeviceToHost ) );
+    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
     // Cleanup Memory
     delete[]( h_inputData );
