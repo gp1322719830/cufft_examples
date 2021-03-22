@@ -11,7 +11,7 @@ __device__ cufftCallbackStoreC d_storeCallbackPtr = CB_MulAndScaleOutputC;
 
 // cuFFT example using explicit memory copies
 template<typename T, uint SIZE, uint BATCH>
-void cufftMalloc( T *h_outputData, const size_t &signalSize, fft_params &fftPlan ) {
+void cufftMalloc( void *inputData, T *h_outputData, const size_t &signalSize, fft_params &fftPlan ) {
 
     PUSH_RANGE( __FUNCTION__, 1 )
 
@@ -20,7 +20,7 @@ void cufftMalloc( T *h_outputData, const size_t &signalSize, fft_params &fftPlan
     cufftHandle fft_inverse;
 
     // Create host data arrays
-    T *h_inputData = new T[signalSize];
+    // T *h_inputData = new T[signalSize];
 
     // Create device data arrays
     T *d_inputData;
@@ -29,13 +29,23 @@ void cufftMalloc( T *h_outputData, const size_t &signalSize, fft_params &fftPlan
 
     PUSH_RANGE( "Prep Input", 2 )
     // Create input data
-    std::mt19937 eng;
-    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
-    for ( int i = 0; i < BATCH; i++ ) {
-        for ( int j = 0; j < SIZE; j++ ) {
-            float temp { dist(eng) };
-            h_inputData[index( i, SIZE, j )] = make_cuComplex( temp, -temp );
-        }
+    // std::mt19937 eng;
+    // std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    // for ( int i = 0; i < BATCH; i++ ) {
+    //     for ( int j = 0; j < SIZE; j++ ) {
+    //         float temp { dist(eng) };
+    //         h_inputData[index( i, SIZE, j )] = make_cuComplex( temp, -temp );
+    //     }
+    // }
+
+    // Create data
+    // std::mt19937 eng;
+    // std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    for ( int i = 0; i < BATCH * SIZE; i+2 ) {
+        // for ( int j = 0; j < SIZE; j++ ) {
+    //         float temp { dist(eng) };
+            h_inputData[i] = complex_type { inputData[i], -inputData[i+1] };
+        // }
     }
 
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), signalSize ) );
@@ -43,7 +53,7 @@ void cufftMalloc( T *h_outputData, const size_t &signalSize, fft_params &fftPlan
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_bufferData ), signalSize ) );
 
     // Copy input data to device
-    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inputData, inputData, signalSize, cudaMemcpyHostToDevice ) );
     POP_RANGE( )
 
     PUSH_RANGE( "CB Params", 3 )
@@ -142,7 +152,7 @@ void cufftMalloc( T *h_outputData, const size_t &signalSize, fft_params &fftPlan
     CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
     // Cleanup Memory
-    delete[]( h_inputData );
+    // delete[]( h_inputData );
     delete[]( h_multiplier );
     CUDA_RT_CALL( cudaFree( d_inputData ) );
     CUDA_RT_CALL( cudaFree( d_outputData ) );

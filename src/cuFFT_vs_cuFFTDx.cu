@@ -46,21 +46,22 @@ void benchmark() {
     cufftComplex *cufftManagedHostData = new cufftComplex[signalSize];
     cufftComplex *cufftDxHostData      = new cufftComplex[signalSize];
 
-    // float *h_inputData = new complex_type[sizeBytes * 2];
-    // std::mt19937 eng;
-    // std::uniform_real_distribution<float> dist(0.0f, 10.0f);
-    // for ( int i = 0; i < BATCH; i++ ) {
-    //     for ( int j = 0; j < SIZE; j++ ) {
-    //         float temp { dist(eng) };
-    //         h_inputData[index( i, SIZE, j )] = complex_type { temp, -temp };
-    //     }
-    // }
+    float *inputData = new float[SIZE * BATCH * 2];
+    std::mt19937 eng;
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    for ( int i = 0; i < (2 * SIZE * BATCH ); i++ ) {
+        // for ( int j = 0; j < SIZE; j++ ) {
+            float temp { dist(eng) };
+            // inputData[index( i, SIZE, j )] = complex_type { temp, -temp };
+            inputData[i] = temp;
+        // }
+    }
 
     printf("Running cufftMalloc\n");
-    cufftMalloc<cufftComplex, SIZE, BATCH>( cufftHostData, signalSize, fftPlan );
+    cufftMalloc<cufftComplex, SIZE, BATCH>( inputData, cufftHostData, signalSize, fftPlan );
 
     printf("Running cufftdxMalloc\n");
-    cufftdxMalloc<ARCH, cufftComplex, SIZE, BATCH, FPB, EPT>( cufftDxHostData );
+    cufftdxMalloc<ARCH, cufftComplex, SIZE, BATCH, FPB, EPT>( inputData, cufftDxHostData );
 
     // Verify cuFFT and cuFFTDx have the same results
     printf( "Compare cuFFT and cuFFTDx (cudaMalloc)\n" );
@@ -82,10 +83,10 @@ int main( int argc, char **argv ) {
     switch ( arch ) {
         // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
     case 700:
-        benchmark<700, 16384, 4096, 1, 32>();
+        benchmark<700, 16384, 4096, 1, 16>();
         break;
     case 750:
-        benchmark<750, 4096, 4096, 1, 32>();
+        benchmark<750, 4096, 4096, 1, 4>();
         break;
     case 800:
         benchmark<800, 32768, 4096, 1, 32>();
