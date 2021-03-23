@@ -4,7 +4,9 @@ These examples utilize the following toolsets:
 * cuFFTDx (Requires joining CUDA Math Library Early Access Program) https://developer.nvidia.com/CUDAMathLibraryEA
 * Thrust
 * C++11
-* NVIDIA Tools Extension (NVTX)
+
+# Hardware
+Volta+
 
 ## cuFFT_vs_cuFFTDx
 
@@ -19,10 +21,49 @@ This code runs three scenarios
 - This is accomplished using NVTX labeling
 3. Compare performance and results between cuFFT and cuFFTDx
 
+### Execution
+For float
+```bash
+make
+./cuFFT_vs_cuFFTDx
+```
+
+For double
+```bash
+export USE_DOUBLE=1
+make
+./cuFFT_vs_cuFFTDx
+```
+
+To compare results (cuFFT and cuFFTDx are not expected to be exact)
+```bash
+export PRINT=1
+make
+./cuFFT_vs_cuFFTDx
+```
+
+### Output
+```bash
+export PRINT=1
+exportUSE_DOUBLE=1
+make
+./cuFFT_vs_cuFFTDx
+
+FFT Size: 2048 -- Batch: 16384 -- FFT Per Block: 1 -- EPT: 16
+cufftExecC2C - FFT/IFFT - Malloc        14.14 ms
+cufftExecC2C - FFT/IFFT - Managed       14.22 ms
+
+Compare results
+All values match!
+
+cufftExecC2C - FFT/IFFT - Dx            14.18 ms
+
+Compare results
+All values match!
+```
+
 ### Notes
 1. This code utilizes cuFFT Callbacks
 - https://devblogs.nvidia.com/cuda-pro-tip-use-cufft-callbacks-custom-data-processing/
-2. This code utilizes NVTX for visual profiling
-- https://devblogs.nvidia.com/cuda-pro-tip-generate-custom-application-profile-timelines-nvtx/
-3. This code utilizes separate compilation and linking
+2. This code utilizes separate compilation and linking
 - https://devblogs.nvidia.com/separate-compilation-linking-cuda-device-code/
