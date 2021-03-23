@@ -50,13 +50,13 @@ make
 ./cuFFT_vs_cuFFTDx
 
 FFT Size: 2048 -- Batch: 16384 -- FFT Per Block: 1 -- EPT: 16
-cufftExecC2C - FFT/IFFT - Malloc        14.14 ms
-cufftExecC2C - FFT/IFFT - Managed       14.22 ms
+cufftExecC2C - FFT/IFFT - Malloc        XX.XX ms
+cufftExecC2C - FFT/IFFT - Managed       XX.XX ms
 
 Compare results
 All values match!
 
-cufftExecC2C - FFT/IFFT - Dx            14.18 ms
+cufftExecC2C - FFT/IFFT - Dx            XX.XX ms
 
 Compare results
 All values match!
