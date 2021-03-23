@@ -21,37 +21,53 @@
 #endif  // CUDA_RT_CALL
 // *************** FOR ERROR CHECKING *******************
 
-// ***************** FOR NVTX MARKERS *******************
-#ifdef USE_NVTX
-#include "nvtx3/nvToolsExt.h"
 
-const uint32_t colors[]   = { 0xff00ff00, 0xff0000ff, 0xffffff00, 0xffff00ff, 0xff00ffff, 0xffff0000, 0xffffffff };
-const int      num_colors = sizeof( colors ) / sizeof( uint32_t );
+// ***************** TIMER *******************
+class Timer {
 
-#define PUSH_RANGE( name, cid )                                                                                        \
-    {                                                                                                                  \
-        int color_id                      = cid;                                                                       \
-        color_id                          = color_id % num_colors;                                                     \
-        nvtxEventAttributes_t eventAttrib = { 0 };                                                                     \
-        eventAttrib.version               = NVTX_VERSION;                                                              \
-        eventAttrib.size                  = NVTX_EVENT_ATTRIB_STRUCT_SIZE;                                             \
-        eventAttrib.colorType             = NVTX_COLOR_ARGB;                                                           \
-        eventAttrib.color                 = colors[color_id];                                                          \
-        eventAttrib.messageType           = NVTX_MESSAGE_TYPE_ASCII;                                                   \
-        eventAttrib.message.ascii         = name;                                                                      \
-        nvtxRangePushEx( &eventAttrib );                                                                               \
+  public:
+    // GPU Timer
+    void startGPUTimer( ) {
+        cudaEventCreate( &startEvent, cudaEventBlockingSync );
+        cudaEventRecord( startEvent );
+    }  // startGPUTimer
+
+    void stopGPUTimer( ) {
+        cudaEventCreate( &stopEvent, cudaEventBlockingSync );
+        cudaEventRecord( stopEvent );
+        cudaEventSynchronize( stopEvent );
+    }  // stopGPUTimer
+
+    void printGPUTime( ) {
+        cudaEventElapsedTime( &elapsed_gpu_ms, startEvent, stopEvent );
+        std::printf( "%0.2f ms\n", elapsed_gpu_ms );
+    }  // printGPUTime
+
+    void printGPUTime( int const &loops ) {
+        cudaEventElapsedTime( &elapsed_gpu_ms, startEvent, stopEvent );
+        std::printf( "%0.2f ms\n", elapsed_gpu_ms / loops );
+    }  // printGPUTime
+
+    void stopAndPrintGPU( ) {
+        stopGPUTimer( );
+        printGPUTime( );
     }
-#define POP_RANGE( ) nvtxRangePop( );
-#else
-#define PUSH_RANGE( name, cid )
-#define POP_RANGE( )
-#endif
-// ***************** FOR NVTX MARKERS *******************
+
+    void stopAndPrintGPU( int const &loops ) {
+        stopGPUTimer( );
+        printGPUTime( loops );
+    }
+
+    cudaEvent_t startEvent { nullptr };
+    cudaEvent_t stopEvent { nullptr };
+    float       elapsed_gpu_ms {};
+};
+// ***************** TIMER *******************
 
 constexpr int   kLoops { 1024 };
 constexpr int   kRank { 1 };
-constexpr float kScale { 1.0f };
-constexpr float kMultiplier { 1.0f };
+constexpr float kScale { 1.7f };
+// constexpr float kMultiplier { 1.3f };
 constexpr float kTolerance { 1e-2f };  // Compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {
@@ -102,7 +118,7 @@ __device__ T ComplexMul( T const &a, U const &b ) {
 
 // Input Callback
 template<typename T>
-__device__ T CB_MulAndScaleInputC( void *dataIn, size_t offset, void *callerInfo, void *sharedPtr ) {
+__device__ T CB_MulAndScaleInput( void *dataIn, size_t offset, void *callerInfo, void *sharedPtr ) {
     cb_inParams<T> *params = static_cast<cb_inParams<T> *>( callerInfo );
     return ( ComplexScale( ComplexMul( static_cast<T *>( dataIn )[offset], ( params->multiplier )[offset] ),
                            params->scale ) );
@@ -110,24 +126,25 @@ __device__ T CB_MulAndScaleInputC( void *dataIn, size_t offset, void *callerInfo
 
 // Output Callback
 template<typename T>
-__device__ void CB_MulAndScaleOutputC( void *dataOut, size_t offset, T element, void *callerInfo, void *sharedPtr ) {
+__device__ void CB_MulAndScaleOutput( void *dataOut, size_t offset, T element, void *callerInfo, void *sharedPtr ) {
     cb_outParams<T> *params { static_cast<cb_outParams<T> *>( callerInfo ) };
 
     static_cast<T *>( dataOut )[offset] =
         ComplexScale( ComplexMul( element, ( params->multiplier )[offset] ), params->scale );
 }
 
+#ifdef PRINT
 template<typename T, uint SIZE, uint BATCH>
 void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
 
-    printf("SIZE %d %d\n", SIZE, BATCH);
+    printf( "\nCompare results\n" );
 
     float2 *relError = new float2[signalSize];
     int     counter {};
 
     for ( int i = 0; i < BATCH; i++ ) {
         for ( int j = 0; j < SIZE; j++ ) {
-            size_t idx         = index( i, SIZE, j );
+            size_t idx      = index( i, SIZE, j );
             relError[idx].x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
             relError[idx].y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
 
@@ -159,3 +176,7 @@ void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
         printf( "All values match!\n\n" );
     }
 }
+#else
+template<typename T, uint SIZE, uint BATCH>
+void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {}
+#endif

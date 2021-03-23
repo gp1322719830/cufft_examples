@@ -1,21 +1,23 @@
 NVCC	:=nvcc -ccbin g++
 CFLAGS	:=-O3 -std=c++17
-ARCHES	:=-gencode arch=compute_80,code=\"compute_80,sm_80\"
+ARCHES	:=-gencode arch=compute_70,code=\"compute_70,sm_70\" \
+			-gencode arch=compute_75,code=\"compute_75,sm_75\" \
+			-gencode arch=compute_80,code=\"compute_80,sm_80\"
 INC_DIR	:=-I/${HOME}/workStuff/cufft/libcufftdx/include
 LIB_DIR	:=
 LIBS	:=-lcufft_static -lculibos
 SRCDIR	:=./src
 OBJDIR	:=obj
 
-ifneq ($(origin PRINT), undefined)
-	ifneq ($(PRINT), 0)
-		CFLAGS += -DPRINT
+ifneq ($(origin USE_DOUBLE), undefined)
+	ifneq ($(USE_DOUBLE), 0)
+		CFLAGS += -DUSE_DOUBLE
 	endif
 endif
 
-ifneq ($(origin USE_NVTX), undefined)
-	ifneq ($(USE_NVTX), 0)
-		CFLAGS += -DUSE_NVTX
+ifneq ($(origin PRINT), undefined)
+	ifneq ($(PRINT), 0)
+		CFLAGS += -DPRINT
 	endif
 endif
 
