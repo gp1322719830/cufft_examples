@@ -13,9 +13,9 @@ __device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr = CB_MulAnd
 #endif
 
 // cuFFT example using managed memory copies
-template<typename T, typename U, uint SIZE, uint BATCH>
-void cufftManaged( const U *     inputSignal,
-                   const U *     multData,
+template<typename T, uint SIZE, uint BATCH>
+void cufftManaged( const T *     inputSignal,
+                   const T *     multData,
                    const size_t &signalSize,
                    fft_params &  fftPlan,
                    T *           h_outputData ) {
@@ -40,11 +40,6 @@ void cufftManaged( const U *     inputSignal,
 
     CUDA_RT_CALL( cudaMemPrefetchAsync( inputData, signalSize, cudaCpuDeviceId, 0 ) );
 
-    // Copy input data to managed allocation
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        inputData[i] = T { inputSignal[i], inputSignal[i + 1] };
-    }
-
     // Create callback parameters
     cb_inParams<T> *inParams;
 
@@ -52,20 +47,16 @@ void cufftManaged( const U *     inputSignal,
     inParams->scale = kScale;
     CUDA_RT_CALL( cudaMallocManaged( &inParams->multiplier, signalSize ) );
 
-    // Copy input data to managed allocation
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        inParams->multiplier[i] = T { multData[i], multData[i + 1] };
-    }
-
     cb_outParams<T> *outParams;
 
     CUDA_RT_CALL( cudaMallocManaged( &outParams, sizeof( cb_outParams<T> ) ) );
     outParams->scale = kScale;
     CUDA_RT_CALL( cudaMallocManaged( &outParams->multiplier, signalSize ) );
 
-    // Copy input data to managed allocation
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        outParams->multiplier[i] = T { multData[i], multData[i + 1] };
+    for ( int i = 0; i < BATCH * SIZE; i++ ) {
+        inputData[i]             = inputSignal[i];
+        inParams->multiplier[i]  = multData[i];
+        outParams->multiplier[i] = multData[i];
     }
 
     CUDA_RT_CALL( cudaMemPrefetchAsync( inputData, signalSize, device, NULL ) );

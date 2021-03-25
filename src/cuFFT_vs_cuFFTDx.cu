@@ -20,7 +20,7 @@ void warmUpFunction( ) {
     thrust::device_vector<int> d_y( N, 4 );
 
     // Perform SAXPY on 1M elements
-    for (int i = 0; i < 1024; i++)
+    for ( int i = 0; i < 1024; i++ )
         thrust::transform( d_x.begin( ), d_x.end( ), d_y.begin( ), d_y.begin( ), 2 * _1 + _2 );
 }
 
@@ -36,13 +36,13 @@ uint get_cuda_device_arch( ) {
 }
 
 template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
-void benchmark() {
-    
+void benchmark( ) {
+
 #ifdef USE_DOUBLE
-    using run_type = double;
+    using run_type   = double;
     using cufft_type = cufftDoubleComplex;
 #else
-    using run_type = float;
+    using run_type   = float;
     using cufft_type = cufftComplex;
 #endif
 
@@ -57,32 +57,36 @@ void benchmark() {
     cufft_type *cufftDxHostData      = new cufft_type[signalSize];
 
     // Create input signal
-    run_type *inputData = new run_type[SIZE * BATCH * 2];
-    std::mt19937 eng;
-    std::uniform_real_distribution<run_type> dist(0.0f, 1.0f);
-    for ( int i = 0; i < (2 * SIZE * BATCH ); i++ ) {
-        run_type temp { dist(eng) };
-            inputData[i] = temp;
+    cufft_type *inputData = new cufft_type[SIZE * BATCH * 2];
+
+    std::mt19937                             eng;
+    std::uniform_real_distribution<run_type> dist( 0.0f, 1.0f );
+    for ( int i = 0; i < ( 2 * SIZE * BATCH ); i++ ) {
+        run_type temp { dist( eng ) };
+        inputData[i].x = temp;
+        inputData[i].y = temp;
     }
 
     // Create multipler signal
-    run_type *multData = new run_type[SIZE * BATCH * 2];
-    for ( int i = 0; i < (2 * SIZE * BATCH ); i++ ) {
-        run_type temp { dist(eng) };
-            multData[i] = temp;
+    cufft_type *multData = new cufft_type[SIZE * BATCH * 2];
+    for ( int i = 0; i < ( 2 * SIZE * BATCH ); i++ ) {
+        run_type temp { dist( eng ) };
+        multData[i].x = temp;
+        multData[i].y = temp;
     }
 
     std::printf( "FFT Size: %d -- Batch: %d -- FFT Per Block: %d -- EPT: %d\n", SIZE, BATCH, FPB, EPT );
-    cufftMalloc<cufft_type, run_type, SIZE, BATCH>( inputData, multData, signalSize, fftPlan, cufftHostData );
+    cufftMalloc<cufft_type, SIZE, BATCH>( inputData, multData, signalSize, fftPlan, cufftHostData );
 
-    cufftManaged<cufft_type, run_type, SIZE, BATCH>( inputData, multData, signalSize, fftPlan, cufftManagedHostData );
-    verifyResults<cufft_type, SIZE, BATCH>( cufftHostData, cufftManagedHostData, signalSize );
+    // cufftManaged<cufft_type, SIZE, BATCH>( inputData, multData, signalSize, fftPlan, cufftManagedHostData );
+    // verifyResults<cufft_type, SIZE, BATCH>( cufftHostData, cufftManagedHostData, signalSize );
 
-    cufftdxMalloc<cufft_type, run_type, ARCH, SIZE, BATCH, FPB, EPT>( inputData, multData, signalSize, cufftDxHostData );
+    cufftdxMalloc<cufft_type, run_type, ARCH, SIZE, BATCH, FPB, EPT>(
+        inputData, multData, signalSize, cufftDxHostData );
 
     // Verify cuFFT and cuFFTDx have the same results
     verifyResults<cufft_type, SIZE, BATCH>( cufftHostData, cufftDxHostData, signalSize );
-
+    //
     delete[]( inputData );
     delete[]( multData );
     delete[]( cufftHostData );
@@ -102,29 +106,29 @@ int main( int argc, char **argv ) {
         // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
 
 #ifdef USE_DOUBLE
-        case 700:
-        benchmark<700, 8192, 16384, 1, 16>();
+    case 700:
+        benchmark<700, 8192, 16384, 1, 16>( );
         break;
-        case 750:
-        benchmark<750, 2048, 16384, 1, 16>();
+    case 750:
+        benchmark<750, 2048, 16384, 1, 16>( );
         break;
-        case 800:
-        benchmark<800, 16384, 16384, 1, 16>();
+    case 800:
+        benchmark<800, 16384, 16384, 1, 16>( );
         break;
-        default:
+    default:
         printf( "GPU architecture must be 7.0 or greater to use cuFFTDx\n "
                 "Skipping Test!\n" );
         break;
-        }
+    }
 #else
     case 700:
-        benchmark<700, 16384, 16384, 1, 32>();
+        benchmark<700, 16384, 16384, 1, 32>( );
         break;
     case 750:
-        benchmark<750, 4096, 16384, 1, 16>();
+        benchmark<750, 4096, 16384, 1, 16>( );
         break;
     case 800:
-        benchmark<800, 32768, 16384, 1, 32>();
+        benchmark<800, 32768, 16384, 1, 32>( );
         break;
     default:
         printf( "GPU architecture must be 7.0 or greater to use cuFFTDx\n "
@@ -132,8 +136,6 @@ int main( int argc, char **argv ) {
         break;
     }
 #endif
-
-
 
     CUDA_RT_CALL( cudaDeviceReset( ) );
 }

@@ -21,7 +21,6 @@
 #endif  // CUDA_RT_CALL
 // *************** FOR ERROR CHECKING *******************
 
-
 // ***************** TIMER *******************
 class Timer {
 

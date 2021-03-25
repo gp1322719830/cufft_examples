@@ -1,9 +1,9 @@
 NVCC	:=nvcc -ccbin g++
-CFLAGS	:=-O3 -std=c++17
+CFLAGS	:=-O3 -std=c++17 -DTHRUST_IGNORE_CUB_VERSION_CHECK
 ARCHES	:=-gencode arch=compute_70,code=\"compute_70,sm_70\" \
 			-gencode arch=compute_75,code=\"compute_75,sm_75\" \
 			-gencode arch=compute_80,code=\"compute_80,sm_80\"
-INC_DIR	:=-I/${HOME}/workStuff/cufft/libcufftdx/include
+INC_DIR	:=-I/${HOME}/workStuff/cufft/libcufftdx/include -I/${HOME}/workStuff/git_examples/cub
 LIB_DIR	:=
 LIBS	:=-lcufft_static -lculibos
 SRCDIR	:=./src

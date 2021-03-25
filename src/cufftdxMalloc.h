@@ -1,37 +1,42 @@
 #include <cufftdx.hpp>
 
-#include "block_io.hpp"
+#include <cub/block/block_load.cuh>
+
 #include "cuda_helper.h"
 
 // cuFFTDx Forward FFT && Inverse FFT CUDA kernel
-template<class FFT, class IFFT>
+template<class FFT, class IFFT, typename T>
 __launch_bounds__( IFFT::max_threads_per_block ) __global__
-    void block_fft_ifft_kernel( typename FFT::value_type *               inputData,
-                                typename IFFT::value_type *              outputData,
-                                cb_inParams<typename FFT::value_type> *  inParams,
-                                cb_outParams<typename IFFT::value_type> *outParams ) {
+    void block_fft_ifft_kernel( T *inputData, T *outputData, cb_inParams<T> *inParams, cb_outParams<T> *outParams ) {
+
+    typedef cub::BlockLoad<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED> BlockLoad;
+
+    typedef cub::BlockStore<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED> BlockStore;
 
     using complex_type = typename FFT::value_type;
     using scalar_type  = typename complex_type::value_type;
 
-    extern __shared__ complex_type shared_mem[];
+    extern __shared__ T shared_mem[];
 
     // Local array and copy data into it
-    complex_type thread_data[FFT::storage_size];
-    complex_type temp_mult[FFT::storage_size];
-    scalar_type  temp_scale {};
+    T thread_data[FFT::storage_size];
+    T temp_mult[FFT::storage_size];
+
+    scalar_type temp_scale {};
 
     // ID of FFT in CUDA block, in range [0; FFT::ffts_per_block)
-    const unsigned int local_fft_id { threadIdx.y };
+    unsigned int global_fft_id =
+        FFT::ffts_per_block == 1 ? blockIdx.x : ( blockIdx.x * FFT::ffts_per_block + threadIdx.y );
 
-    // Load data from global memory to registers
-    example::io<FFT>::load( inputData, thread_data, local_fft_id );
+    global_fft_id *= cufftdx::size_of<FFT>::value;
+
+    BlockLoad( ).Load( inputData + global_fft_id, thread_data );
     temp_scale = inParams->scale;
 
     // Execute FFT
     FFT( ).execute( thread_data, shared_mem );
 
-    example::io<FFT>::load( inParams->multiplier, temp_mult, local_fft_id );
+    BlockLoad( ).Load( inParams->multiplier + global_fft_id, temp_mult );
 
 #pragma unroll FFT::elements_per_thread
     for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
@@ -42,7 +47,7 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     // Execute FFT
     IFFT( ).execute( thread_data, shared_mem );
 
-    example::io<FFT>::load( outParams->multiplier, temp_mult, local_fft_id );
+    BlockLoad( ).Load( outParams->multiplier + global_fft_id, temp_mult );
     temp_scale = outParams->scale;
 
 #pragma unroll FFT::elements_per_thread
@@ -52,11 +57,11 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     }
 
     // Save results
-    example::io<IFFT>::store( thread_data, outputData, local_fft_id );
+    BlockStore( ).Store( outputData + global_fft_id, thread_data );
 }
 
 template<typename T, typename U, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
-void cufftdxMalloc( const U *inputSignal, const U *multData, const size_t &signalSize, T *h_outputData ) {
+void cufftdxMalloc( const T *inputSignal, const T *multData, const size_t &signalSize, T *h_outputData ) {
 
     Timer timer;
 
@@ -71,70 +76,56 @@ void cufftdxMalloc( const U *inputSignal, const U *multData, const size_t &signa
                            cufftdx::Direction<cufftdx::fft_direction::inverse>( ) + cufftdx::Precision<U>( ) +
                            cufftdx::ElementsPerThread<EPT>( ) + cufftdx::FFTsPerBlock<FPB>( ) + cufftdx::SM<A>( ) );
 
-    using complex_type = typename FFT::value_type;
-    using scalar_type  = typename complex_type::value_type;
+    // using complex_type = typename FFT::value_type;
+    // using scalar_type  = typename complex_type::value_type;
 
     // Increase dynamic memory limit if required.
     CUDA_RT_CALL( cudaFuncSetAttribute(
-        block_fft_ifft_kernel<FFT, IFFT>, cudaFuncAttributeMaxDynamicSharedMemorySize, FFT::shared_memory_size ) );
-
-    // Copy input data to managed allocation
-    complex_type *h_inputData = new complex_type[signalSize];
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        h_inputData[i] = complex_type( inputSignal[i], inputSignal[i + 1] );
-    }
-
-    // Create multiplier data
-    complex_type *h_multiplier = new complex_type[signalSize];
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        h_multiplier[i] = complex_type { multData[i], multData[i + 1] };
-    }
+        block_fft_ifft_kernel<FFT, IFFT, T>, cudaFuncAttributeMaxDynamicSharedMemorySize, FFT::shared_memory_size ) );
 
     // Create data arrays and allocate
-    complex_type *d_inputData;
-    complex_type *d_outputData;
+    T *d_inputData;
+    T *d_outputData;
 
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), signalSize ) );
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outputData ), signalSize ) );
 
     // Copy input data to device
-    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inputData, inputSignal, signalSize, cudaMemcpyHostToDevice ) );
 
-    complex_type *d_multiplier;
+    T *d_multiplier;
 
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), signalSize ) );
-    CUDA_RT_CALL( cudaMemcpy( d_multiplier, h_multiplier, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplier, multData, signalSize, cudaMemcpyHostToDevice ) );
 
     // Create callback parameters
-    cb_inParams<complex_type> h_inParams;
+    cb_inParams<T> h_inParams;
     h_inParams.scale      = kScale;
     h_inParams.multiplier = d_multiplier;
 
     // Copy callback parameters to device
-    cb_inParams<complex_type> *d_inParams;
+    cb_inParams<T> *d_inParams;
 
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<complex_type> ) ) );
-    CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<complex_type> ), cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<T> ) ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<T> ), cudaMemcpyHostToDevice ) );
 
-    cb_outParams<complex_type> h_outParams;
+    cb_outParams<T> h_outParams;
     h_outParams.scale      = kScale;
     h_outParams.multiplier = d_multiplier;
 
-    cb_outParams<complex_type> *d_outParams;
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outParams ), sizeof( cb_outParams<complex_type> ) ) );
-    CUDA_RT_CALL(
-        cudaMemcpy( d_outParams, &h_outParams, sizeof( cb_outParams<complex_type> ), cudaMemcpyHostToDevice ) );
+    cb_outParams<T> *d_outParams;
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outParams ), sizeof( cb_outParams<T> ) ) );
+    CUDA_RT_CALL( cudaMemcpy( d_outParams, &h_outParams, sizeof( cb_outParams<T> ), cudaMemcpyHostToDevice ) );
 
     unsigned int blocks_per_grid { BATCH / FPB };
     // printf("%d: %d: %d: %d: %d\n", blocks_per_grid, FFT::block_dim.x, FFT::block_dim.y, FFT::block_dim.z,
-    // FFT::shared_memory_size);
 
     // Execute FFT plan
     std::printf( "cufftExecC2C - FFT/IFFT - Dx\t\t" );
     timer.startGPUTimer( );
 
     for ( int i = 0; i < kLoops; i++ ) {
-        block_fft_ifft_kernel<FFT, IFFT><<<blocks_per_grid, FFT::block_dim, FFT::shared_memory_size>>>(
+        block_fft_ifft_kernel<FFT, IFFT, T><<<blocks_per_grid, FFT::block_dim, FFT::shared_memory_size>>>(
             d_inputData, d_outputData, d_inParams, d_outParams );
     }
     timer.stopAndPrintGPU( kLoops );
@@ -142,9 +133,7 @@ void cufftdxMalloc( const U *inputSignal, const U *multData, const size_t &signa
     // Copy data from device to host
     CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
-    // Cleanup Memory
-    delete[]( h_inputData );
-    delete[]( h_multiplier );
+    // Cleanup MemoryZ
     CUDA_RT_CALL( cudaFree( d_inputData ) );
     CUDA_RT_CALL( cudaFree( d_outputData ) );
     CUDA_RT_CALL( cudaFree( d_multiplier ) );

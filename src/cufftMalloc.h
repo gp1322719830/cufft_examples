@@ -13,9 +13,9 @@ __device__ cufftCallbackStoreC d_storeCallbackPtr = CB_MulAndScaleOutput;
 #endif
 
 // cuFFT example using explicit memory copies
-template<typename T, typename U, uint SIZE, uint BATCH>
-void cufftMalloc( const U *     inputSignal,
-                  const U *     multData,
+template<typename T, uint SIZE, uint BATCH>
+void cufftMalloc( const T *     inputSignal,
+                  const T *     multData,
                   const size_t &signalSize,
                   fft_params &  fftPlan,
                   T *           h_outputData ) {
@@ -25,20 +25,6 @@ void cufftMalloc( const U *     inputSignal,
     // Create cufftHandle
     cufftHandle fft_forward;
     cufftHandle fft_inverse;
-
-    // Copy input data to managed allocation
-    T *h_inputData = new T[signalSize];
-
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        h_inputData[i] = T { inputSignal[i], inputSignal[i + 1] };
-    }
-
-    // Create multiplier data
-    T *h_multiplier = new T[signalSize];
-
-    for ( int i = 0; i < BATCH * SIZE; i += 2 ) {
-        h_multiplier[i] = T { multData[i], multData[i + 1] };
-    }
 
     // Create device data arrays
     T *d_inputData;
@@ -50,11 +36,11 @@ void cufftMalloc( const U *     inputSignal,
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_bufferData ), signalSize ) );
 
     // Copy input data to device
-    CUDA_RT_CALL( cudaMemcpy( d_inputData, h_inputData, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inputData, inputSignal, signalSize, cudaMemcpyHostToDevice ) );
 
     T *d_multiplier;
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), signalSize ) );
-    CUDA_RT_CALL( cudaMemcpy( d_multiplier, h_multiplier, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplier, multData, signalSize, cudaMemcpyHostToDevice ) );
 
     // Create callback parameters
     cb_inParams<T> h_inParams;
@@ -156,8 +142,6 @@ void cufftMalloc( const U *     inputSignal,
     CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
     // Cleanup Memory
-    delete[]( h_inputData );
-    delete[]( h_multiplier );
     CUDA_RT_CALL( cudaFree( d_inputData ) );
     CUDA_RT_CALL( cudaFree( d_outputData ) );
     CUDA_RT_CALL( cudaFree( d_bufferData ) );
