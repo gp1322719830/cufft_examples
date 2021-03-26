@@ -65,9 +65,7 @@ class Timer {
 
 constexpr int   kLoops { 1024 };
 constexpr int   kRank { 1 };
-constexpr float kScale { 1.7f };
-// constexpr float kMultiplier { 1.3f };
-constexpr float kTolerance { 1e-2f };  // Compare cuFFT / cuFFTDx results
+constexpr float kTolerance { 1e-3f };  // Compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {
     return ( i * j + k );
@@ -107,8 +105,8 @@ __device__ T ComplexScale( T const &a, float const &scale ) {
 }
 
 // Complex multiplication
-template<typename T, typename U>
-__device__ T ComplexMul( T const &a, U const &b ) {
+template<typename T>
+__device__ T ComplexMul( T const &a, T const &b ) {
     T c;
     c.x = a.x * b.x - a.y * b.y;
     c.y = a.x * b.y + a.y * b.x;
@@ -130,6 +128,14 @@ __device__ void CB_MulAndScaleOutput( void *dataOut, size_t offset, T element, v
 
     static_cast<T *>( dataOut )[offset] =
         ComplexScale( ComplexMul( element, ( params->multiplier )[offset] ), params->scale );
+}
+
+// Output Callback
+template<typename T>
+__device__ void CB_MulAndScaleOutputR( void *dataOut, size_t offset, T element, void *callerInfo, void *sharedPtr ) {
+    cb_outParams<T> *params { static_cast<cb_outParams<T> *>( callerInfo ) };
+
+    static_cast<T *>( dataOut )[offset] = element * ( params->multiplier )[offset] * params->scale;
 }
 
 #ifdef PRINT
@@ -165,6 +171,38 @@ void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
                         ref[idx].y,
                         alt[idx].y,
                         relError[idx].y,
+                        kTolerance );
+                counter++;
+            }
+        }
+    }
+
+    if ( !counter ) {
+        printf( "All values match!\n\n" );
+    }
+}
+
+template<typename T, uint SIZE, uint BATCH>
+void verifyResults_r2r( T const *ref, T const *alt, const size_t &signalSize ) {
+
+    printf( "\nCompare results\n" );
+
+    // T * relError = new T[signalSize];
+    T   relError {};
+    int counter {};
+
+    for ( int i = 0; i < BATCH; i++ ) {
+        for ( int j = 0; j < SIZE; j++ ) {
+            size_t idx = index( i, SIZE, j );
+            relError   = ( ref[idx] - alt[idx] ) / ref[idx];
+
+            if ( relError > kTolerance ) {
+                printf( "R - Batch %d: Element %d: %f - %f (%0.7f) > %f\n",
+                        i,
+                        j,
+                        ref[idx],
+                        alt[idx],
+                        relError,
                         kTolerance );
                 counter++;
             }

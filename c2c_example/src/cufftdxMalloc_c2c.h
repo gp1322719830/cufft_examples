@@ -2,7 +2,7 @@
 
 #include <cub/block/block_load.cuh>
 
-#include "cuda_helper.h"
+#include "../../common/cuda_helper.h"
 
 // cuFFTDx Forward FFT && Inverse FFT CUDA kernel
 template<class FFT, class IFFT, typename T>
@@ -60,21 +60,25 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     BlockStore( ).Store( outputData + global_fft_id, thread_data );
 }
 
-template<typename T, typename U, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
-void cufftdxMalloc( const T *inputSignal, const T *multData, const size_t &signalSize, T *h_outputData ) {
+template<typename T, typename R, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
+void cufftdxMalloc_c2c( const T *     inputSignal,
+                        const T *     multData,
+                        const R &     scalar,
+                        const size_t &signalSize,
+                        T *           h_outputData ) {
 
     Timer timer;
 
     // FFT is defined, its: size, type, direction, precision. Block() operator
     // informs that FFT will be executed on block level. Shared memory is
     // required for co-operation between threads.
-    using FFT = decltype( cufftdx::Block( ) + cufftdx::Size<SIZE>( ) + cufftdx::Type<cufftdx::fft_type::c2c>( ) +
-                          cufftdx::Direction<cufftdx::fft_direction::forward>( ) + cufftdx::Precision<U>( ) +
-                          cufftdx::ElementsPerThread<EPT>( ) + cufftdx::FFTsPerBlock<FPB>( ) + cufftdx::SM<A>( ) );
+    using FFT_base = decltype( cufftdx::Block( ) + cufftdx::Size<SIZE>( ) + cufftdx::Precision<R>( ) +
+                               cufftdx::Type<cufftdx::fft_type::c2c>( ) + cufftdx::ElementsPerThread<EPT>( ) +
+                               cufftdx::FFTsPerBlock<FPB>( ) + cufftdx::SM<A>( ) );
 
-    using IFFT = decltype( cufftdx::Block( ) + cufftdx::Size<SIZE>( ) + cufftdx::Type<cufftdx::fft_type::c2c>( ) +
-                           cufftdx::Direction<cufftdx::fft_direction::inverse>( ) + cufftdx::Precision<U>( ) +
-                           cufftdx::ElementsPerThread<EPT>( ) + cufftdx::FFTsPerBlock<FPB>( ) + cufftdx::SM<A>( ) );
+    using FFT = decltype( FFT_base() + cufftdx::Direction<cufftdx::fft_direction::forward>( ) );
+
+    using IFFT = decltype( FFT_base() + cufftdx::Direction<cufftdx::fft_direction::inverse>( ) );
 
     // using complex_type = typename FFT::value_type;
     // using scalar_type  = typename complex_type::value_type;
@@ -100,7 +104,7 @@ void cufftdxMalloc( const T *inputSignal, const T *multData, const size_t &signa
 
     // Create callback parameters
     cb_inParams<T> h_inParams;
-    h_inParams.scale      = kScale;
+    h_inParams.scale      = scalar;
     h_inParams.multiplier = d_multiplier;
 
     // Copy callback parameters to device
@@ -110,7 +114,7 @@ void cufftdxMalloc( const T *inputSignal, const T *multData, const size_t &signa
     CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<T> ), cudaMemcpyHostToDevice ) );
 
     cb_outParams<T> h_outParams;
-    h_outParams.scale      = kScale;
+    h_outParams.scale      = scalar;
     h_outParams.multiplier = d_multiplier;
 
     cb_outParams<T> *d_outParams;

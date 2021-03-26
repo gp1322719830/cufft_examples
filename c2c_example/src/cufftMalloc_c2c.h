@@ -1,7 +1,7 @@
 #include <cufft.h>
 #include <cufftXt.h>
 
-#include "cuda_helper.h"
+#include "../../common/cuda_helper.h"
 
 // Define variables to point at callbacks
 #ifdef USE_DOUBLE
@@ -13,12 +13,13 @@ __device__ cufftCallbackStoreC d_storeCallbackPtr = CB_MulAndScaleOutput;
 #endif
 
 // cuFFT example using explicit memory copies
-template<typename T, uint SIZE, uint BATCH>
-void cufftMalloc( const T *     inputSignal,
-                  const T *     multData,
-                  const size_t &signalSize,
-                  fft_params &  fftPlan,
-                  T *           h_outputData ) {
+template<typename T, typename R, uint SIZE, uint BATCH>
+void cufftMalloc_c2c( const T *     inputSignal,
+                      const T *     multData,
+                      const R &     scalar,
+                      const size_t &signalSize,
+                      fft_params &  fftPlan,
+                      T *           h_outputData ) {
 
     Timer timer;
 
@@ -44,7 +45,7 @@ void cufftMalloc( const T *     inputSignal,
 
     // Create callback parameters
     cb_inParams<T> h_inParams;
-    h_inParams.scale      = kScale;
+    h_inParams.scale      = scalar;
     h_inParams.multiplier = d_multiplier;
 
     // Copy callback parameters to device
@@ -54,7 +55,7 @@ void cufftMalloc( const T *     inputSignal,
     CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<T> ), cudaMemcpyHostToDevice ) );
 
     cb_outParams<T> h_outParams;
-    h_outParams.scale      = kScale;
+    h_outParams.scale      = scalar;
     h_outParams.multiplier = d_multiplier;
 
     cb_outParams<T> *d_outParams;
