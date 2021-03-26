@@ -128,7 +128,7 @@ int main( int argc, char **argv ) {
         benchmark_c2c<700, 16384, 16384, 1, 32>( );
         break;
     case 750:
-        benchmark_c2c<750, 4096, 16384, 1, 16>( );
+        benchmark_c2c<750, 151, 16384, 1, 16>( );
         break;
     case 800:
         benchmark_c2c<800, 32768, 16384, 1, 32>( );
