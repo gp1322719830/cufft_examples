@@ -65,8 +65,8 @@ class Timer {
 
 constexpr int   kLoops { 1024 };
 constexpr int   kRank { 1 };
-constexpr float kLower { -5.0 };  // Compare cuFFT / cuFFTDx results
-constexpr float kUpper { 5.0 };  // Compare cuFFT / cuFFTDx results
+constexpr float kLower { -5.0 };       // Compare cuFFT / cuFFTDx results
+constexpr float kUpper { 5.0 };        // Compare cuFFT / cuFFTDx results
 constexpr float kTolerance { 1e-3f };  // Compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {
@@ -146,33 +146,33 @@ void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
 
     printf( "\nCompare results\n" );
 
-    float2 *relError = new float2[signalSize];
-    int     counter {};
+    float2 relError {};
+    int    counter {};
 
     for ( int i = 0; i < BATCH; i++ ) {
         for ( int j = 0; j < SIZE; j++ ) {
-            size_t idx      = index( i, SIZE, j );
-            relError[idx].x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
-            relError[idx].y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
+            size_t idx = index( i, SIZE, j );
+            relError.x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
+            relError.y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
 
-            if ( relError[idx].x > kTolerance ) {
+            if ( relError.x > kTolerance ) {
                 printf( "R - Batch %d: Element %d: %f - %f (%0.7f) > %f\n",
                         i,
                         j,
                         ref[idx].x,
                         alt[idx].x,
-                        relError[idx].x,
+                        relError.x,
                         kTolerance );
                 counter++;
             }
 
-            if ( relError[idx].y > kTolerance ) {
+            if ( relError.y > kTolerance ) {
                 printf( "I - Batch %d: Element %d: %f - %f (%0.7f) > %f\n",
                         i,
                         j,
                         ref[idx].y,
                         alt[idx].y,
-                        relError[idx].y,
+                        relError.y,
                         kTolerance );
                 counter++;
             }
@@ -189,7 +189,6 @@ void verifyResults_r2r( T const *ref, T const *alt, const size_t &signalSize ) {
 
     printf( "\nCompare results\n" );
 
-    // T * relError = new T[signalSize];
     T   relError {};
     int counter {};
 
