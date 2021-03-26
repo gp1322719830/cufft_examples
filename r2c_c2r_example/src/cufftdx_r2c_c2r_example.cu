@@ -9,6 +9,8 @@
 #include "cufftManaged_r2r.h"
 #include "cufftdxMalloc_r2r.h"
 
+#include "../../common/cuda_helper.h"
+
 // Warm-up function
 void warmUpFunction( ) {
 

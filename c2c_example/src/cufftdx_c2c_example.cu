@@ -9,6 +9,8 @@
 #include "cufftManaged_c2c.h"
 #include "cufftdxMalloc_c2c.h"
 
+#include "../../common/cuda_helper.h"
+
 // Warm-up function
 void warmUpFunction( ) {
 
@@ -128,7 +130,7 @@ int main( int argc, char **argv ) {
         benchmark_c2c<700, 16384, 16384, 1, 32>( );
         break;
     case 750:
-        benchmark_c2c<750, 151, 16384, 1, 16>( );
+        benchmark_c2c<750, 256, 16384, 1, 16>( );
         break;
     case 800:
         benchmark_c2c<800, 32768, 16384, 1, 32>( );

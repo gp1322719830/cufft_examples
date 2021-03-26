@@ -216,4 +216,6 @@ void verifyResults_r2r( T const *ref, T const *alt, const size_t &signalSize ) {
 #else
 template<typename T, uint SIZE, uint BATCH>
 void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {}
+template<typename T, uint SIZE, uint BATCH>
+void verifyResults_r2r( T const *ref, T const *alt, const size_t &signalSize ) {}
 #endif
