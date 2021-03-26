@@ -8,14 +8,14 @@
 // cuFFTDx Forward FFT && Inverse FFT CUDA kernel
 template<class FFT, class IFFT, typename T, typename U>
 __launch_bounds__( IFFT::max_threads_per_block ) __global__
-    void block_fft_ifft_kernel( T *              inputData,
-                                    T *              outputData,
-                                    cb_inParams<U> * inParams,
-                                    cb_outParams<T> *outParams ) {
+    void block_fft_ifft_kernel( const T *              inputData,
+                                T *                    outputData,
+                                const cb_inParams<U> * inParams,
+                                const cb_outParams<T> *outParams ) {
 
-    // typedef cub::BlockLoad<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED> BlockLoad;
+    typedef cub::BlockLoad<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED> BlockLoad;
 
-    // typedef cub::BlockStore<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED> BlockStore;
+    typedef cub::BlockStore<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED> BlockStore;
 
     using complex_type = typename FFT::value_type;
     using scalar_type  = typename complex_type::value_type;
@@ -68,7 +68,8 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     index = offset + threadIdx.x;
 #pragma unroll FFT::elements_per_thread
     for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-        outputData[index] = reinterpret_cast<const scalar_type *>( thread_data )[i] * ( outParams->multiplier[index] * outParams->scale );
+        outputData[index] = reinterpret_cast<const scalar_type *>( thread_data )[i] *
+                            ( outParams->multiplier[index] * outParams->scale );
         index += stride;
     }
 

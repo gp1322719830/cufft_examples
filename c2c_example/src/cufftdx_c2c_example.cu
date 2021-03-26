@@ -62,7 +62,7 @@ void benchmark_c2c( ) {
     cufft_type *inputData = new cufft_type[SIZE * BATCH * 2];
 
     std::mt19937                             eng;
-    std::uniform_real_distribution<run_type> dist( 0.0f, 1.0f );
+    std::uniform_real_distribution<run_type> dist( kLower, kUpper );
     for ( int i = 0; i < ( 2 * SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
         inputData[i].x = temp;
@@ -109,7 +109,7 @@ int main( int argc, char **argv ) {
     warmUpFunction( );
 
     switch ( arch ) {
-    // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
+        // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
 #ifdef USE_DOUBLE
     case 700:
         benchmark_c2c<700, 8192, 16384, 1, 16>( );
@@ -130,7 +130,7 @@ int main( int argc, char **argv ) {
         benchmark_c2c<700, 16384, 16384, 1, 32>( );
         break;
     case 750:
-        benchmark_c2c<750, 256, 16384, 1, 16>( );
+        benchmark_c2c<750, 4096, 16384, 1, 16>( );
         break;
     case 800:
         benchmark_c2c<800, 32768, 16384, 1, 32>( );

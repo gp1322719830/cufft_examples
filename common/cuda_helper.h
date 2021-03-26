@@ -65,6 +65,8 @@ class Timer {
 
 constexpr int   kLoops { 1024 };
 constexpr int   kRank { 1 };
+constexpr float kLower { -5.0 };  // Compare cuFFT / cuFFTDx results
+constexpr float kUpper { 5.0 };  // Compare cuFFT / cuFFTDx results
 constexpr float kTolerance { 1e-3f };  // Compare cuFFT / cuFFTDx results
 
 constexpr int index( int i, int j, int k ) {

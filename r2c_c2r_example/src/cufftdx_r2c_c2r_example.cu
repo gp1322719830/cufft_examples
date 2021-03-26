@@ -64,7 +64,7 @@ void benchmark_r2r( ) {
     cufft_type *inputData = new cufft_type[signalSize];
 
     std::mt19937                             eng;
-    std::uniform_real_distribution<run_type> dist( -5.0f, 5.0f );
+    std::uniform_real_distribution<run_type> dist( kLower, kUpper );
     // printf("\n[");
     for ( int i = 0; i < ( SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
@@ -117,7 +117,7 @@ int main( int argc, char **argv ) {
     warmUpFunction( );
 
     switch ( arch ) {
-    // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
+        // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
 #ifdef USE_DOUBLE
     case 700:
         benchmark_r2r<700, 8192, 16384, 1, 16>( );
