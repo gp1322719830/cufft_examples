@@ -1,3 +1,6 @@
+# NOTE
+At the moment, C2C examples require https://github.com/mnicely/cub.
+
 # Getting Started
 These examples utilize the following toolsets:
 * cuFFT
