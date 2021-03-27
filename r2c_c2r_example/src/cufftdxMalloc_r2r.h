@@ -22,7 +22,7 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     extern __shared__ complex_type shared_mem[];
 
     // Local array and copy data into it
-    complex_type thread_data[FFT::storage_size] {};  // U type doesn't work with FFT.execute()
+    complex_type thread_data[FFT::storage_size] {};
     complex_type temp_mult_i[FFT::storage_size] {};
 
     // ID of FFT in CUDA block, in range [0; FFT::ffts_per_block)
