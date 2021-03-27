@@ -61,7 +61,7 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     }
 
     // Save results
-    Option 1
+    // Option 1
     BlockStore_C2R( ).Store( outputData + global_fft_id, reinterpret_cast<R2C &>( thread_data ) );
 
     // Option 2
