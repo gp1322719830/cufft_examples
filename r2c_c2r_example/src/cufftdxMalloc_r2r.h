@@ -2,7 +2,6 @@
 
 #include <cub/block/block_load.cuh>
 
-#include "../../common/block_io.hpp"
 #include "../../common/cuda_helper.h"
 
 // cuFFTDx Forward FFT && Inverse FFT CUDA kernel
@@ -14,16 +13,17 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
                                 const cb_outParams<T> *outParams ) {
 
     using complex_type = typename FFT::value_type;
-    using scalar_type  = typename complex_type::value_type;                                
+    using scalar_type  = typename complex_type::value_type;
 
     typedef cub::BlockLoad<complex_type, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED> BlockLoad;
-    // typedef cub::BlockStore<complex_type, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED> BlockStore;
+    typedef cub::BlockLoad<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED>            BlockLoad_R2C;
+    typedef cub::BlockStore<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED>          BlockStore;
 
     extern __shared__ complex_type shared_mem[];
 
     // Local array and copy data into it
-    complex_type thread_data[FFT::storage_size];  // U type doesn't work with FFT.execute()
-    complex_type temp_mult_i[FFT::storage_size];
+    complex_type thread_data[FFT::storage_size] {};  // U type doesn't work with FFT.execute()
+    complex_type temp_mult_i[FFT::storage_size] {};
 
     // ID of FFT in CUDA block, in range [0; FFT::ffts_per_block)
     unsigned int global_fft_id =
@@ -31,28 +31,18 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
 
     global_fft_id *= cufftdx::size_of<FFT>::value;
 
-    unsigned int local_fft_id = threadIdx.y;
-    example::io<FFT, T>::load_r2c( inputData, thread_data, local_fft_id );
+    // Option 1
+    using R2C = T[FFT::storage_size];
+    BlockLoad_R2C( ).Load( inputData + global_fft_id, reinterpret_cast<R2C &>( thread_data ) );
+
+    // Option 2
+    // BlockLoad_R2C( ).Load( inputData + global_fft_id,
+    // *static_cast<T(*)[FFT::storage_size]>(static_cast<void*>(thread_data)));
 
     // // Execute FFT
     FFT( ).execute( thread_data, shared_mem );
-    // for ( int i = 0; i < FFT::storage_size; i++ )
-    //     printf( "%d: %d: %d: %f.%f\n", threadIdx.x, threadIdx.y, i, thread_data[i].x, thread_data[i].y );
-
-    unsigned int offset = example::io<FFT, T>::batch_offset( local_fft_id );
-    unsigned int stride = example::io<FFT, T>::stride_size( );
-    unsigned int index  = offset + threadIdx.x;
-// #pragma unroll FFT::elements_per_thread
-//     for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-//         temp_mult_i[i] = reinterpret_cast<const complex_type *>( inParams->multiplier )[index];
-//         index += stride;
-//     }
-//     // example::io<FFT, T>::load_r2c(inParams->multiplier, temp_mult_i, local_fft_id);
 
     BlockLoad( ).Load( reinterpret_cast<const complex_type *>( inParams->multiplier ) + global_fft_id, temp_mult_i );
-
-    //     // for (int i=0; i<FFT::storage_size; i++)
-    //     //     printf("%d: %d: %d: %f.%f\n", threadIdx.x, threadIdx.y, i, temp_mult_i[i].x, temp_mult_i[i].y);
 
 #pragma unroll IFFT::elements_per_thread
     for ( int i = 0; i < IFFT::elements_per_thread; i++ ) {
@@ -60,32 +50,18 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
         thread_data[i] = ComplexScale( thread_data[i], inParams->scale );
     }
 
-    // for (int i=0; i<FFT::storage_size; i++)
-    //     printf("%d: %d: %d: %f.%f\n", threadIdx.x, threadIdx.y, i, temp_mult_i[i].x, temp_mult_i[i].y);
-
     // Execute FFT
     IFFT( ).execute( thread_data, shared_mem );
 
-    // for (int i=0; i<FFT::storage_size; i++)
-    // printf("%d: %d: %d || %d: %f : %f\n", threadIdx.x, threadIdx.y, blockIdx.x, i, thread_data[i].x,
-    // thread_data[i].y);
-
-    // for (int i=0; i<FFT::storage_size; i++)
-    //     printf("%d: %d: %d: || %d: %d: %d: %d\n", threadIdx.x, threadIdx.y, blockIdx.x, i, offset, stride, index);
-    index = offset + threadIdx.x;
+    unsigned int index = global_fft_id + threadIdx.x;
 #pragma unroll FFT::elements_per_thread
     for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-        outputData[index] = reinterpret_cast<const scalar_type *>( thread_data )[i] *
-                            ( outParams->multiplier[index] * outParams->scale );
-        index += stride;
+        reinterpret_cast<scalar_type *>( thread_data )[i] *= ( outParams->multiplier[index] * outParams->scale );
+        index += ( cufftdx::size_of<FFT>::value / FFT::elements_per_thread );
     }
 
-    //     for (int i=0; i<FFT::storage_size; i++)
-    //         printf("%d: %d: %d || %d: %f.%f\n", threadIdx.x, threadIdx.y, blockIdx.x, i, thread_data[i].x,
-    //         thread_data[i].y);
-
     // Save results
-    // example::io<FFT, T>::store_c2r(thread_data, outputData, local_fft_id);
+    BlockStore( ).Store( outputData + global_fft_id, reinterpret_cast<R2C &>( thread_data ) );
 }
 
 template<typename T, typename U, typename R, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
