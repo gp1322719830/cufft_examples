@@ -17,7 +17,7 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
 
     typedef cub::BlockLoad<complex_type, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED> BlockLoad;
     typedef cub::BlockLoad<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_LOAD_STRIPED>            BlockLoad_R2C;
-    typedef cub::BlockStore<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED>          BlockStore;
+    typedef cub::BlockStore<T, FFT::block_dim.x, FFT::storage_size, cub::BLOCK_STORE_STRIPED>          BlockStore_C2R;
 
     extern __shared__ complex_type shared_mem[];
 
@@ -61,7 +61,12 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     }
 
     // Save results
-    BlockStore( ).Store( outputData + global_fft_id, reinterpret_cast<R2C &>( thread_data ) );
+    Option 1
+    BlockStore_C2R( ).Store( outputData + global_fft_id, reinterpret_cast<R2C &>( thread_data ) );
+
+    // Option 2
+    // BlockStore_C2R( ).Store( outputData + global_fft_id,
+    //                          *static_cast<T( * )[FFT::storage_size]>( static_cast<void *>( thread_data ) ) );
 }
 
 template<typename T, typename U, typename R, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
