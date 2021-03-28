@@ -5,12 +5,11 @@
 #include "../../common/cuda_helper.h"
 
 // cuFFTDx Forward FFT && Inverse FFT CUDA kernel
-// Parameter T could be used throughout
-template<class FFT, class IFFT, typename T>
+template<class FFT, class IFFT, typename T, typename U>
 __launch_bounds__( IFFT::max_threads_per_block ) __global__
     void block_fft_ifft_kernel( const T *              inputData,
                                 T *                    outputData,
-                                const cb_inParams<T> * inParams,
+                                const cb_inParams<U> * inParams,
                                 const cb_outParams<T> *outParams ) {
 
     using complex_type = typename FFT::value_type;
@@ -22,8 +21,8 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     extern __shared__ complex_type shared_mem[];
 
     // Local array and copy data into it
-    complex_type thread_data[FFT::storage_size];
-    complex_type temp_mult[FFT::storage_size];
+    complex_type thread_data[FFT::storage_size] {};
+    complex_type temp_mult[FFT::storage_size] {};
 
     scalar_type temp_scale {};
 
@@ -34,21 +33,19 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     global_fft_id *= cufftdx::size_of<FFT>::value;
 
     BlockLoad( ).Load( reinterpret_cast<const complex_type *>( inputData ) + global_fft_id, thread_data );
-    temp_scale = inParams->scale;
 
-    // Execute FFT
-    FFT( ).execute( thread_data, shared_mem );
+    // // Execute FFT
+    IFFT( ).execute( thread_data, shared_mem );
 
-    BlockLoad( ).Load( reinterpret_cast<const complex_type *>( inParams->multiplier ) + global_fft_id, temp_mult );
-
+    unsigned int index = global_fft_id + threadIdx.x;
 #pragma unroll FFT::elements_per_thread
     for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-        thread_data[i] = ComplexMul( thread_data[i], temp_mult[i] );
-        thread_data[i] = ComplexScale( thread_data[i], temp_scale );
+        reinterpret_cast<scalar_type *>( thread_data )[i] *= ( inParams->multiplier[index] * inParams->scale );
+        index += ( cufftdx::size_of<FFT>::value / FFT::elements_per_thread );
     }
 
     // Execute FFT
-    IFFT( ).execute( thread_data, shared_mem );
+    FFT( ).execute( thread_data, shared_mem );
 
     BlockLoad( ).Load( reinterpret_cast<const complex_type *>( outParams->multiplier ) + global_fft_id, temp_mult );
     temp_scale = outParams->scale;
@@ -63,12 +60,13 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
     BlockStore( ).Store( reinterpret_cast<complex_type *>( outputData ) + global_fft_id, thread_data );
 }
 
-template<typename T, typename R, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
-void cufftdxMalloc_c2c( const T *     inputSignal,
-                        const T *     multData,
-                        const R &     scalar,
-                        const size_t &signalSize,
-                        T *           h_outputData ) {
+template<typename T, typename U, typename R, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
+void cufftdxMalloc( const T *     inputSignal,
+                    const U *     multDataIn,
+                    const T *     multDataOut,
+                    const R &     scalar,
+                    const size_t &signalSize,
+                    T *           h_outputData ) {
 
     Timer timer;
 
@@ -76,15 +74,16 @@ void cufftdxMalloc_c2c( const T *     inputSignal,
     // informs that FFT will be executed on block level. Shared memory is
     // required for co-operation between threads.
     using FFT_base = decltype( cufftdx::Block( ) + cufftdx::Size<SIZE>( ) + cufftdx::Precision<R>( ) +
-                               cufftdx::Type<cufftdx::fft_type::c2c>( ) + cufftdx::ElementsPerThread<EPT>( ) +
-                               cufftdx::FFTsPerBlock<FPB>( ) + cufftdx::SM<A>( ) );
+                               cufftdx::ElementsPerThread<EPT>( ) + cufftdx::FFTsPerBlock<FPB>( ) + cufftdx::SM<A>( ) );
 
-    using FFT  = decltype( FFT_base( ) + cufftdx::Direction<cufftdx::fft_direction::forward>( ) );
-    using IFFT = decltype( FFT_base( ) + cufftdx::Direction<cufftdx::fft_direction::inverse>( ) );
+    using FFT  = decltype( FFT_base( ) + cufftdx::Type<cufftdx::fft_type::r2c>( ) );
+    using IFFT = decltype( FFT_base( ) + cufftdx::Type<cufftdx::fft_type::c2r>( ) );
+
+    const auto shared_memory_size = std::max( FFT::shared_memory_size, IFFT::shared_memory_size );
 
     // Increase dynamic memory limit if required.
     CUDA_RT_CALL( cudaFuncSetAttribute(
-        block_fft_ifft_kernel<FFT, IFFT, T>, cudaFuncAttributeMaxDynamicSharedMemorySize, FFT::shared_memory_size ) );
+        block_fft_ifft_kernel<FFT, IFFT, T, U>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_size ) );
 
     // Create data arrays and allocate
     T *d_inputData;
@@ -96,25 +95,27 @@ void cufftdxMalloc_c2c( const T *     inputSignal,
     // Copy input data to device
     CUDA_RT_CALL( cudaMemcpy( d_inputData, inputSignal, signalSize, cudaMemcpyHostToDevice ) );
 
-    T *d_multiplier;
-
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), signalSize ) );
-    CUDA_RT_CALL( cudaMemcpy( d_multiplier, multData, signalSize, cudaMemcpyHostToDevice ) );
+    U *d_multiplierIn;
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplierIn ), signalSize / 2 ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplierIn, multDataIn, signalSize / 2, cudaMemcpyHostToDevice ) );
 
     // Create callback parameters
-    cb_inParams<T> h_inParams;
+    cb_inParams<U> h_inParams;
     h_inParams.scale      = scalar;
-    h_inParams.multiplier = d_multiplier;
+    h_inParams.multiplier = d_multiplierIn;
 
     // Copy callback parameters to device
-    cb_inParams<T> *d_inParams;
+    cb_inParams<U> *d_inParams;
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<U> ) ) );
+    CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<U> ), cudaMemcpyHostToDevice ) );
 
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<T> ) ) );
-    CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<T> ), cudaMemcpyHostToDevice ) );
+    T *d_multiplierOut;
+    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplierOut ), signalSize ) );
+    CUDA_RT_CALL( cudaMemcpy( d_multiplierOut, multDataOut, signalSize, cudaMemcpyHostToDevice ) );
 
     cb_outParams<T> h_outParams;
     h_outParams.scale      = scalar;
-    h_outParams.multiplier = d_multiplier;
+    h_outParams.multiplier = d_multiplierOut;
 
     cb_outParams<T> *d_outParams;
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outParams ), sizeof( cb_outParams<T> ) ) );
@@ -123,11 +124,15 @@ void cufftdxMalloc_c2c( const T *     inputSignal,
     unsigned int blocks_per_grid { static_cast<unsigned int>( std::ceil( BATCH / FPB ) ) };
 
     // Execute FFT plan
-    std::printf( "cufftExecC2C - FFT/IFFT - Dx\t\t" );
+#ifdef USE_DOUBLE
+    std::printf( "cufftExecZ2D/D2Z - FFT/IFFT - Dx\t" );
+#else
+    std::printf( "cufftExecC2R/R2C - FFT/IFFT - Dx\t" );
+#endif
     timer.startGPUTimer( );
 
     for ( int i = 0; i < kLoops; i++ ) {
-        block_fft_ifft_kernel<FFT, IFFT, T><<<blocks_per_grid, FFT::block_dim, FFT::shared_memory_size>>>(
+        block_fft_ifft_kernel<FFT, IFFT, T, U><<<blocks_per_grid, FFT::block_dim, FFT::shared_memory_size>>>(
             d_inputData, d_outputData, d_inParams, d_outParams );
     }
     timer.stopAndPrintGPU( kLoops );
@@ -135,10 +140,11 @@ void cufftdxMalloc_c2c( const T *     inputSignal,
     // Copy data from device to host
     CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
 
-    // Cleanup MemoryZ
+    // Cleanup Memory
     CUDA_RT_CALL( cudaFree( d_inputData ) );
     CUDA_RT_CALL( cudaFree( d_outputData ) );
-    CUDA_RT_CALL( cudaFree( d_multiplier ) );
+    CUDA_RT_CALL( cudaFree( d_multiplierIn ) );
+    CUDA_RT_CALL( cudaFree( d_multiplierOut ) );
     CUDA_RT_CALL( cudaFree( d_inParams ) );
     CUDA_RT_CALL( cudaFree( d_outParams ) );
 }

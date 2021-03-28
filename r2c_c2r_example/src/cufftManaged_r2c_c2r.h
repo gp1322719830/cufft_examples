@@ -5,11 +5,11 @@
 
 // Define variables to point at callbacks
 #ifdef USE_DOUBLE
-__device__ __managed__ cufftCallbackLoadZ d_loadManagedCallback_r2r_Ptr   = CB_MulAndScaleInput;
-__device__ __managed__ cufftCallbackStoreD d_storeManagedCallback_r2r_Ptr = CB_MulAndScaleOutputR;
+__device__ __managed__ cufftCallbackLoadZ d_loadManagedCallbackPtr   = CB_MulAndScaleInput;
+__device__ __managed__ cufftCallbackStoreD d_storeManagedCallbackPtr = CB_MulAndScaleOutputR;
 #else
-__device__ __managed__ cufftCallbackLoadC d_loadManagedCallback_r2r_Ptr   = CB_MulAndScaleInput;
-__device__ __managed__ cufftCallbackStoreR d_storeManagedCallback_r2r_Ptr = CB_MulAndScaleOutputR;
+__device__ __managed__ cufftCallbackLoadC d_loadManagedCallbackPtr   = CB_MulAndScaleInput;
+__device__ __managed__ cufftCallbackStoreR d_storeManagedCallbackPtr = CB_MulAndScaleOutputR;
 #endif
 
 // cuFFT example using managed memory copies
@@ -101,22 +101,26 @@ void cufftManaged_r2r( const T *     inputSignal,
     // Set input callback
 #ifdef USE_DOUBLE
     CUDA_RT_CALL( cufftXtSetCallback(
-        fft_inverse, ( void ** )&d_loadManagedCallback_r2r_Ptr, CUFFT_CB_LD_COMPLEX_DOUBLE, ( void ** )&inParams ) );
+        fft_inverse, ( void ** )&d_loadManagedCallbackPtr, CUFFT_CB_LD_COMPLEX_DOUBLE, ( void ** )&inParams ) );
 
     // Set output callback
     CUDA_RT_CALL( cufftXtSetCallback(
-        fft_inverse, ( void ** )&d_storeManagedCallback_r2r_Ptr, CUFFT_CB_ST_REAL_DOUBLE, ( void ** )&outParams ) );
+        fft_inverse, ( void ** )&d_storeManagedCallbackPtr, CUFFT_CB_ST_REAL_DOUBLE, ( void ** )&outParams ) );
 #else
     CUDA_RT_CALL( cufftXtSetCallback(
-        fft_inverse, ( void ** )&d_loadManagedCallback_r2r_Ptr, CUFFT_CB_LD_COMPLEX, ( void ** )&inParams ) );
+        fft_inverse, ( void ** )&d_loadManagedCallback_c2rPtr, CUFFT_CB_LD_COMPLEX, ( void ** )&inParams ) );
 
     // Set output callback
     CUDA_RT_CALL( cufftXtSetCallback(
-        fft_inverse, ( void ** )&d_storeManagedCallback_r2r_Ptr, CUFFT_CB_ST_REAL, ( void ** )&outParams ) );
+        fft_inverse, ( void ** )&d_storeManagedCallbackPtr, CUFFT_CB_ST_REAL, ( void ** )&outParams ) );
 #endif
 
     // Execute FFT plan
-    std::printf( "cufftExecC2C - FFT/IFFT - Managed\t" );
+#ifdef USE_DOUBLE
+    std::printf( "cufftExecD2Z/Z2D - FFT/IFFT - Managed\t" );
+#else
+    std::printf( "cufftExecR2C/C2R - FFT/IFFT - Managed\t" );
+#endif
     timer.startGPUTimer( );
 
     for ( int i = 0; i < kLoops; i++ ) {

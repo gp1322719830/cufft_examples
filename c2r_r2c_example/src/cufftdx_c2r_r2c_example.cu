@@ -5,9 +5,9 @@
 #include <thrust/device_vector.h>
 #include <thrust/transform.h>
 
-#include "cufftMalloc_r2c_c2r.h"
-#include "cufftManaged_r2c_c2r.h"
-#include "cufftdxMalloc_r2c_c2r.h"
+#include "cufftMalloc_c2r_r2c.h"
+#include "cufftManaged_c2r_r2c.h"
+#include "cufftdxMalloc_c2r_r2c.h"
 
 #include "../../common/cuda_helper.h"
 
@@ -16,12 +16,12 @@ void benchmark_r2r( ) {
 
 #ifdef USE_DOUBLE
     using run_type   = double;
-    using cufft_type = cufftDoubleReal;
-    using buf_type   = cufftDoubleComplex;
+    using cufft_type = cufftDoubleComplex;
+    using buf_type   = cufftDoubleReal;
 #else
     using run_type   = float;
-    using cufft_type = cufftReal;
-    using buf_type   = cufftComplex;
+    using cufft_type = cufftComplex;
+    using buf_type   = cufftReal;
 #endif
 
     // Calculate size of signal array to process
@@ -41,34 +41,35 @@ void benchmark_r2r( ) {
     std::uniform_real_distribution<run_type> dist( kLower, kUpper );
     for ( int i = 0; i < ( SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
-        inputData[i] = temp;
+        inputData[i].x = temp;
+        inputData[i].y = temp;
     }
 
     // Create multipler signal
-    buf_type *  multDataIn  = new buf_type[signalSize];
-    cufft_type *multDataOut = new cufft_type[signalSize * 2];
+    buf_type *  multDataIn  = new buf_type[signalSize / 2];
+    cufft_type *multDataOut = new cufft_type[signalSize];
     for ( int i = 0; i < ( SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
-        multDataIn[i].x = temp;
-        multDataIn[i].y = temp + 1;
-        multDataOut[i]  = temp;
+        multDataIn[i]    = temp;
+        multDataOut[i].x = temp;
+        multDataOut[i].y = temp + 1;
     }
 
     run_type scalar { 1.7 };
 
     std::printf( "FFT Size: %d -- Batch: %d -- FFT Per Block: %d -- EPT: %d\n", SIZE, BATCH, FPB, EPT );
-    cufftMalloc_r2r<cufft_type, buf_type, run_type, SIZE, BATCH>(
+    cufftMalloc<cufft_type, buf_type, run_type, SIZE, BATCH>(
         inputData, multDataIn, multDataOut, scalar, signalSize, fftPlan, cufftHostData );
 
-    cufftManaged_r2r<cufft_type, buf_type, run_type, SIZE, BATCH>(
+    cufftManaged<cufft_type, buf_type, run_type, SIZE, BATCH>(
         inputData, multDataIn, multDataOut, scalar, signalSize, fftPlan, cufftManagedHostData );
-    verifyResults_r2r<cufft_type, SIZE, BATCH>( cufftHostData, cufftManagedHostData, SIZE );
+    verifyResults_c2c<cufft_type, SIZE, BATCH>( cufftHostData, cufftManagedHostData, ( SIZE / 2 + 1 ) );
 
-    cufftdxMalloc_r2r<cufft_type, buf_type, run_type, ARCH, SIZE, BATCH, FPB, EPT>(
+    cufftdxMalloc<cufft_type, buf_type, run_type, ARCH, SIZE, BATCH, FPB, EPT>(
         inputData, multDataIn, multDataOut, scalar, signalSize, cufftDxHostData );
 
-    // // Verify cuFFT and cuFFTDx have the same results
-    verifyResults_r2r<cufft_type, SIZE, BATCH>( cufftHostData, cufftDxHostData, SIZE );
+    // Verify cuFFT and cuFFTDx have the same results
+    verifyResults_c2c<cufft_type, SIZE, BATCH>( cufftHostData, cufftDxHostData, ( SIZE / 2 + 1 ) );
 
     delete[]( inputData );
     delete[]( multDataIn );

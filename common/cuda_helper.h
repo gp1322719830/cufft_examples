@@ -73,6 +73,16 @@ constexpr int index( int i, int j, int k ) {
     return ( i * j + k );
 }
 
+uint get_cuda_device_arch( ) {
+    int device;
+    CUDA_RT_CALL( cudaGetDevice( &device ) );
+
+    cudaDeviceProp props;
+    CUDA_RT_CALL( cudaGetDeviceProperties( &props, device ) );
+
+    return ( static_cast<uint>( props.major ) * 100 + static_cast<uint>( props.minor ) * 10 );
+}
+
 typedef struct _fft_params {
     int rank;            // 1D FFTs
     int n[kRank];        // Size of the Fourier transform
@@ -123,6 +133,14 @@ __device__ T CB_MulAndScaleInput( void *dataIn, size_t offset, void *callerInfo,
                            params->scale ) );
 }
 
+// Input Callback
+template<typename T>
+__device__ T CB_MulAndScaleInputR( void *dataIn, size_t offset, void *callerInfo, void *sharedPtr ) {
+    cb_inParams<T> *params = static_cast<cb_inParams<T> *>( callerInfo );
+
+    return ( static_cast<T *>( dataIn )[offset] * ( params->multiplier )[offset] * params->scale );
+}
+
 // Output Callback
 template<typename T>
 __device__ void CB_MulAndScaleOutput( void *dataOut, size_t offset, T element, void *callerInfo, void *sharedPtr ) {
@@ -142,7 +160,7 @@ __device__ void CB_MulAndScaleOutputR( void *dataOut, size_t offset, T element, 
 
 #ifdef PRINT
 template<typename T, uint SIZE, uint BATCH>
-void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
+void verifyResults_c2c( T const *ref, T const *alt, const size_t &size ) {
 
     printf( "\nCompare results\n" );
 
@@ -150,7 +168,7 @@ void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
     int    counter {};
 
     for ( int i = 0; i < BATCH; i++ ) {
-        for ( int j = 0; j < SIZE; j++ ) {
+        for ( int j = 0; j < size; j++ ) {
             size_t idx = index( i, SIZE, j );
             relError.x = ( ref[idx].x - alt[idx].x ) / ref[idx].x;
             relError.y = ( ref[idx].y - alt[idx].y ) / ref[idx].y;
@@ -185,7 +203,7 @@ void verifyResults( T const *ref, T const *alt, const size_t &signalSize ) {
 }
 
 template<typename T, uint SIZE, uint BATCH>
-void verifyResults_r2r( T const *ref, T const *alt, const size_t &signalSize ) {
+void verifyResults_r2r( T const *ref, T const *alt, const size_t &size ) {
 
     printf( "\nCompare results\n" );
 
@@ -193,7 +211,7 @@ void verifyResults_r2r( T const *ref, T const *alt, const size_t &signalSize ) {
     int counter {};
 
     for ( int i = 0; i < BATCH; i++ ) {
-        for ( int j = 0; j < SIZE; j++ ) {
+        for ( int j = 0; j < size; j++ ) {
             size_t idx = index( i, SIZE, j );
             relError   = ( ref[idx] - alt[idx] ) / ref[idx];
 

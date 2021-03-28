@@ -21,20 +21,20 @@ ifneq ($(origin PRINT), undefined)
 	endif
 endif
 
-SOURCES := cuFFT_vs_cuFFTDx
+SOURCES := cufftdx_c2r_r2c_example
 
 OBJECTS=$(addprefix $(OBJDIR)/, $(SOURCES:%=%.o))
 
-all: build cuFFT_vs_cuFFTDx
+all: build cufftdx_c2r_r2c_example
 .PHONY: all
 
 build:	
 	@mkdir -p $(OBJDIR)
 
-cuFFT_vs_cuFFTDx: $(OBJDIR)/cuFFT_vs_cuFFTDx.o
+cufftdx_c2r_r2c_example: $(OBJDIR)/cufftdx_c2r_r2c_example.o
 	$(NVCC) --cudart=static $(CFLAGS) ${ARCHES} $^ -o $@ $(LIBS)
 
-$(OBJDIR)/cuFFT_vs_cuFFTDx.o: $(SRCDIR)/cuFFT_vs_cuFFTDx.cu
+$(OBJDIR)/cufftdx_c2r_r2c_example.o: $(SRCDIR)/cufftdx_c2r_r2c_example.cu
 	$(NVCC) -dc $(CFLAGS) $(INC_DIR) $(LIB_DIR) ${ARCHES} $< -o $@ $(LIBS)
 	
 clean:
