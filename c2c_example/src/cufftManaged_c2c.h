@@ -114,6 +114,8 @@ void cufftManaged( const int &   device,
     }
     timer.stopAndPrintGPU( kLoops );
 
+    CUDA_RT_CALL( cudaMemPrefetchAsync( outputData, signalSize, cudaCpuDeviceId, 0 ) );
+
     // Cleanup Memory
     CUDA_RT_CALL( cudaFree( bufferData ) );
     CUDA_RT_CALL( cudaFree( inParams ) );

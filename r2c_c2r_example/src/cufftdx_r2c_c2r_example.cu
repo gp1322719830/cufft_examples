@@ -29,7 +29,7 @@ void benchmark( ) {
 
     // Calculate size of signal array to process
     const size_t signalSize { sizeof( cufft_type ) * SIZE * BATCH };
-    const size_t bufferSize { signalSize * 2 };
+    const size_t bufferSize { sizeof( buf_type ) * SIZE * BATCH };
 
     // Set fft plan parameters
     fft_params fftPlan { kRank, { SIZE }, 1, 1, SIZE, SIZE, { 0 }, { 0 }, BATCH };
