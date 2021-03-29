@@ -56,13 +56,13 @@ void benchmark( ) {
 
     // Create multipler signal
     buf_type *  multDataIn;
-    cufft_type *multDataOut;  
+    cufft_type *multDataOut;
 
-    CUDA_RT_CALL( cudaMallocManaged( &multDataIn, signalSize/2 ) );
+    CUDA_RT_CALL( cudaMallocManaged( &multDataIn, bufferSize ) );
     CUDA_RT_CALL( cudaMallocManaged( &multDataOut, signalSize ) );
     for ( int i = 0; i < ( SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
-        multDataIn[i]    = temp;  
+        multDataIn[i]    = temp;
         multDataOut[i].x = temp;
         multDataOut[i].y = temp + 1;
     }
@@ -83,12 +83,12 @@ void benchmark( ) {
     // Verify cuFFT and cuFFTDx have the same results
     verifyResults_c2c<cufft_type, SIZE, BATCH>( cufftHostData, cufftDxHostData, ( SIZE / 2 + 1 ) );
 
-    CUDA_RT_CALL( cudaFree( inputData ));
-    CUDA_RT_CALL( cudaFree( multDataIn ));
-    CUDA_RT_CALL( cudaFree( multDataOut ));
-    CUDA_RT_CALL( cudaFree( cufftHostData ));
-    CUDA_RT_CALL( cudaFree( cufftManagedHostData ));
-    CUDA_RT_CALL( cudaFree( cufftDxHostData ));
+    CUDA_RT_CALL( cudaFree( inputData ) );
+    CUDA_RT_CALL( cudaFree( multDataIn ) );
+    CUDA_RT_CALL( cudaFree( multDataOut ) );
+    CUDA_RT_CALL( cudaFree( cufftHostData ) );
+    CUDA_RT_CALL( cudaFree( cufftManagedHostData ) );
+    CUDA_RT_CALL( cudaFree( cufftDxHostData ) );
 }
 
 int main( int argc, char **argv ) {

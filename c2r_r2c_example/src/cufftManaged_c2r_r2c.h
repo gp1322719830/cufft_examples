@@ -14,7 +14,8 @@ __device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr = CB_MulAnd
 
 // cuFFT example using managed memory copies
 template<typename T, typename U, typename R, uint SIZE, uint BATCH>
-void cufftManaged( const int & device,const T *     inputSignal,
+void cufftManaged( const int &   device,
+                   const T *     inputSignal,
                    const U *     multDataIn,
                    const T *     multDataOut,
                    const R &     scalar,
@@ -42,16 +43,15 @@ void cufftManaged( const int & device,const T *     inputSignal,
     // Create callback parameters
     cb_inParams<U> *inParams;
 
-    // Only need half size signalSize -- Complex 2 Real
     CUDA_RT_CALL( cudaMallocManaged( &inParams, sizeof( cb_inParams<U> ) ) );
-    inParams->scale = scalar;
-    inParams->multiplier = const_cast<U*>(multDataIn);
+    inParams->scale      = scalar;
+    inParams->multiplier = const_cast<U *>( multDataIn );
 
     cb_outParams<T> *outParams;
 
     CUDA_RT_CALL( cudaMallocManaged( &outParams, sizeof( cb_outParams<T> ) ) );
-    outParams->scale = scalar;
-    outParams->multiplier = const_cast<T*>(multDataOut);
+    outParams->scale      = scalar;
+    outParams->multiplier = const_cast<T *>( multDataOut );
 
     CUDA_RT_CALL( cudaMemPrefetchAsync( inParams, sizeof( cb_inParams<U> ), device, NULL ) );
     CUDA_RT_CALL( cudaMemPrefetchAsync( outParams, sizeof( cb_outParams<T> ), device, NULL ) );
@@ -114,10 +114,10 @@ void cufftManaged( const int & device,const T *     inputSignal,
 
     for ( int i = 0; i < kLoops; i++ ) {
 #ifdef USE_DOUBLE
-        CUDA_RT_CALL( cufftExecZ2D( fft_inverse, const_cast<T*>(inputSignal), bufferData ) );
+        CUDA_RT_CALL( cufftExecZ2D( fft_inverse, const_cast<T *>( inputSignal ), bufferData ) );
         CUDA_RT_CALL( cufftExecD2Z( fft_forward, bufferData, outputData ) );
 #else
-        CUDA_RT_CALL( cufftExecC2R( fft_inverse, const_cast<T*>(inputSignal), bufferData ) );
+        CUDA_RT_CALL( cufftExecC2R( fft_inverse, const_cast<T *>( inputSignal ), bufferData ) );
         CUDA_RT_CALL( cufftExecR2C( fft_forward, bufferData, outputData ) );
 #endif
     }

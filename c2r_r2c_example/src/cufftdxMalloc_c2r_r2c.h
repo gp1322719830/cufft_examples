@@ -61,8 +61,8 @@ __launch_bounds__( IFFT::max_threads_per_block ) __global__
 }
 
 template<typename T, typename U, typename R, uint A, uint SIZE, uint BATCH, uint FPB, uint EPT>
-void cufftdxMalloc( const int & device,
-const T *     inputSignal,
+void cufftdxMalloc( const int &   device,
+                    const T *     inputSignal,
                     const U *     multDataIn,
                     const T *     multDataOut,
                     const R &     scalar,
@@ -90,18 +90,18 @@ const T *     inputSignal,
     CUDA_RT_CALL( cudaMemPrefetchAsync( inputSignal, signalSize, device, NULL ) );
     CUDA_RT_CALL( cudaMemPrefetchAsync( outputData, signalSize, device, NULL ) );
     CUDA_RT_CALL( cudaMemPrefetchAsync( multDataIn, bufferSize, device, NULL ) );
-    CUDA_RT_CALL( cudaMemPrefetchAsync( multDataOut, signalSize, device, NULL ) ); 
+    CUDA_RT_CALL( cudaMemPrefetchAsync( multDataOut, signalSize, device, NULL ) );
 
     // Create callback parameters
     cb_inParams<U> *inParams;
     CUDA_RT_CALL( cudaMallocManaged( &inParams, sizeof( cb_inParams<U> ) ) );
     inParams->scale      = scalar;
-    inParams->multiplier = const_cast<U*>(multDataIn);
+    inParams->multiplier = const_cast<U *>( multDataIn );
 
     cb_outParams<T> *outParams;
     CUDA_RT_CALL( cudaMallocManaged( &outParams, sizeof( cb_outParams<T> ) ) );
     outParams->scale      = scalar;
-    outParams->multiplier = const_cast<T*>(multDataOut);
+    outParams->multiplier = const_cast<T *>( multDataOut );
 
     CUDA_RT_CALL( cudaMemPrefetchAsync( inParams, sizeof( cb_inParams<U> ), device, NULL ) );
     CUDA_RT_CALL( cudaMemPrefetchAsync( outParams, sizeof( cb_outParams<T> ), device, NULL ) );
@@ -118,7 +118,7 @@ const T *     inputSignal,
 
     for ( int i = 0; i < kLoops; i++ ) {
         block_fft_ifft_kernel<FFT, IFFT, T, U><<<blocks_per_grid, FFT::block_dim, FFT::shared_memory_size>>>(
-            const_cast<T*>(inputSignal), outputData, inParams, outParams );
+            const_cast<T *>( inputSignal ), outputData, inParams, outParams );
     }
     timer.stopAndPrintGPU( kLoops );
 }
