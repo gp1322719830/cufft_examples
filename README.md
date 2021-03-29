@@ -5,7 +5,6 @@ At the moment, C2C examples require https://github.com/mnicely/cub.
 These examples utilize the following toolsets:
 * cuFFT
 * cuFFTDx (Requires joining CUDA Math Library Early Access Program) https://developer.nvidia.com/CUDAMathLibraryEA
-* Thrust
 * C++11
 
 # Hardware
