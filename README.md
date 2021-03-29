@@ -20,7 +20,6 @@ This code runs three scenarios
 ### Objectives
 1. Compare coding styles between cuFFT, using cudaMalloc and cudaMallocManaged
 2. Compare performance between cuFFT, using cudaMalloc and cudaMallocManaged
-- This is accomplished using NVTX labeling
 3. Compare performance and results between cuFFT and cuFFTDx
 
 ### Execution
