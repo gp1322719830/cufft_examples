@@ -108,7 +108,7 @@ void cufftManaged_r2r( const T *     inputSignal,
         fft_inverse, ( void ** )&d_storeManagedCallbackPtr, CUFFT_CB_ST_REAL_DOUBLE, ( void ** )&outParams ) );
 #else
     CUDA_RT_CALL( cufftXtSetCallback(
-        fft_inverse, ( void ** )&d_loadManagedCallback_c2rPtr, CUFFT_CB_LD_COMPLEX, ( void ** )&inParams ) );
+        fft_inverse, ( void ** )&d_loadManagedCallbackPtr, CUFFT_CB_LD_COMPLEX, ( void ** )&inParams ) );
 
     // Set output callback
     CUDA_RT_CALL( cufftXtSetCallback(
