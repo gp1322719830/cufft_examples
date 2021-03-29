@@ -141,4 +141,6 @@ void cufftMalloc( const int &   device,
 
     // Cleanup Memory
     CUDA_RT_CALL( cudaFree( d_bufferData ) );
+    CUDA_RT_CALL( cudaFree( d_inParams ) );
+    CUDA_RT_CALL( cudaFree( d_outParams ) );
 }

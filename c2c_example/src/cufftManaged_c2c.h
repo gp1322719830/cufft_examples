@@ -14,15 +14,13 @@ __device__ __managed__ cufftCallbackStoreC d_storeManagedCallbackPtr = CB_MulAnd
 
 // cuFFT example using managed memory copies
 template<typename T, typename R, uint SIZE, uint BATCH>
-void cufftManaged_c2c( const T *     inputSignal,
-                       const T *     multData,
-                       const R &     scalar,
-                       const size_t &signalSize,
-                       fft_params &  fftPlan,
-                       T *           h_outputData ) {
-
-    int device = -1;
-    CUDA_RT_CALL( cudaGetDevice( &device ) );
+void cufftManaged( const int &   device,
+                   const T *     inputSignal,
+                   const T *     multData,
+                   const R &     scalar,
+                   const size_t &signalSize,
+                   fft_params &  fftPlan,
+                   T *           outputData ) {
 
     Timer timer;
 
@@ -31,40 +29,27 @@ void cufftManaged_c2c( const T *     inputSignal,
     cufftHandle fft_inverse;
 
     // Create data arrays
-    T *inputData;
-    T *outputData;
     T *bufferData;
-
-    CUDA_RT_CALL( cudaMallocManaged( &inputData, signalSize ) );
-    CUDA_RT_CALL( cudaMallocManaged( &outputData, signalSize ) );
     CUDA_RT_CALL( cudaMallocManaged( &bufferData, signalSize ) );
 
-    CUDA_RT_CALL( cudaMemPrefetchAsync( inputData, signalSize, cudaCpuDeviceId, 0 ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( inputSignal, signalSize, device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( outputData, signalSize, device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( multData, signalSize, device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( bufferData, signalSize, device, NULL ) );
 
     // Create callback parameters
     cb_inParams<T> *inParams;
-
     CUDA_RT_CALL( cudaMallocManaged( &inParams, sizeof( cb_inParams<T> ) ) );
-    inParams->scale = scalar;
-    CUDA_RT_CALL( cudaMallocManaged( &inParams->multiplier, signalSize ) );
+    inParams->scale      = scalar;
+    inParams->multiplier = const_cast<T *>( multData );
 
     cb_outParams<T> *outParams;
-
     CUDA_RT_CALL( cudaMallocManaged( &outParams, sizeof( cb_outParams<T> ) ) );
-    outParams->scale = scalar;
-    CUDA_RT_CALL( cudaMallocManaged( &outParams->multiplier, signalSize ) );
+    outParams->scale      = scalar;
+    outParams->multiplier = const_cast<T *>( multData );
 
-    for ( int i = 0; i < BATCH * SIZE; i++ ) {
-        inputData[i]             = inputSignal[i];
-        inParams->multiplier[i]  = multData[i];
-        outParams->multiplier[i] = multData[i];
-    }
-
-    CUDA_RT_CALL( cudaMemPrefetchAsync( inputData, signalSize, device, NULL ) );
-    CUDA_RT_CALL( cudaMemPrefetchAsync( outputData, signalSize, device, NULL ) );
-    CUDA_RT_CALL( cudaMemPrefetchAsync( bufferData, signalSize, device, NULL ) );
-    CUDA_RT_CALL( cudaMemPrefetchAsync( inParams->multiplier, signalSize, device, NULL ) );
-    CUDA_RT_CALL( cudaMemPrefetchAsync( outParams->multiplier, signalSize, device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( inParams, sizeof( cb_inParams<T> ), device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( outParams, sizeof( cb_outParams<T> ), device, NULL ) );
 
     CUDA_RT_CALL( cufftPlanMany( &fft_forward,
                                  fftPlan.rank,
@@ -120,23 +105,17 @@ void cufftManaged_c2c( const T *     inputSignal,
 
     for ( int i = 0; i < kLoops; i++ ) {
 #ifdef USE_DOUBLE
-        CUDA_RT_CALL( cufftExecZ2Z( fft_forward, inputData, bufferData, CUFFT_FORWARD ) );
+        CUDA_RT_CALL( cufftExecZ2Z( fft_forward, const_cast<T *>( inputSignal ), bufferData, CUFFT_FORWARD ) );
         CUDA_RT_CALL( cufftExecZ2Z( fft_inverse, bufferData, outputData, CUFFT_INVERSE ) );
 #else
-        CUDA_RT_CALL( cufftExecC2C( fft_forward, inputData, bufferData, CUFFT_FORWARD ) );
+        CUDA_RT_CALL( cufftExecC2C( fft_forward, const_cast<T *>( inputSignal ), bufferData, CUFFT_FORWARD ) );
         CUDA_RT_CALL( cufftExecC2C( fft_inverse, bufferData, outputData, CUFFT_INVERSE ) );
 #endif
     }
     timer.stopAndPrintGPU( kLoops );
 
-    CUDA_RT_CALL( cudaMemcpy( h_outputData, outputData, signalSize, cudaMemcpyDeviceToHost ) );
-
     // Cleanup Memory
-    CUDA_RT_CALL( cudaFree( inputData ) );
-    CUDA_RT_CALL( cudaFree( outputData ) );
     CUDA_RT_CALL( cudaFree( bufferData ) );
-    CUDA_RT_CALL( cudaFree( inParams->multiplier ) );
     CUDA_RT_CALL( cudaFree( inParams ) );
-    CUDA_RT_CALL( cudaFree( outParams->multiplier ) );
     CUDA_RT_CALL( cudaFree( outParams ) );
 }

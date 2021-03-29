@@ -14,12 +14,13 @@ __device__ cufftCallbackStoreC d_storeCallbackPtr = CB_MulAndScaleOutput;
 
 // cuFFT example using explicit memory copies
 template<typename T, typename R, uint SIZE, uint BATCH>
-void cufftMalloc_c2c( const T *     inputSignal,
-                      const T *     multData,
-                      const R &     scalar,
-                      const size_t &signalSize,
-                      fft_params &  fftPlan,
-                      T *           h_outputData ) {
+void cufftMalloc( const int &   device,
+                  const T *     inputSignal,
+                  const T *     multData,
+                  const R &     scalar,
+                  const size_t &signalSize,
+                  fft_params &  fftPlan,
+                  T *           outputData ) {
 
     Timer timer;
 
@@ -28,35 +29,26 @@ void cufftMalloc_c2c( const T *     inputSignal,
     cufftHandle fft_inverse;
 
     // Create device data arrays
-    T *d_inputData;
-    T *d_outputData;
     T *d_bufferData;
-
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inputData ), signalSize ) );
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outputData ), signalSize ) );
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_bufferData ), signalSize ) );
 
-    // Copy input data to device
-    CUDA_RT_CALL( cudaMemcpy( d_inputData, inputSignal, signalSize, cudaMemcpyHostToDevice ) );
-
-    T *d_multiplier;
-    CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_multiplier ), signalSize ) );
-    CUDA_RT_CALL( cudaMemcpy( d_multiplier, multData, signalSize, cudaMemcpyHostToDevice ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( inputSignal, signalSize, device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( outputData, signalSize, device, NULL ) );
+    CUDA_RT_CALL( cudaMemPrefetchAsync( multData, signalSize, device, NULL ) );
 
     // Create callback parameters
     cb_inParams<T> h_inParams;
     h_inParams.scale      = scalar;
-    h_inParams.multiplier = d_multiplier;
+    h_inParams.multiplier = const_cast<T *>( multData );
 
     // Copy callback parameters to device
     cb_inParams<T> *d_inParams;
-
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_inParams ), sizeof( cb_inParams<T> ) ) );
     CUDA_RT_CALL( cudaMemcpy( d_inParams, &h_inParams, sizeof( cb_inParams<T> ), cudaMemcpyHostToDevice ) );
 
     cb_outParams<T> h_outParams;
     h_outParams.scale      = scalar;
-    h_outParams.multiplier = d_multiplier;
+    h_outParams.multiplier = const_cast<T *>( multData );
 
     cb_outParams<T> *d_outParams;
     CUDA_RT_CALL( cudaMalloc( reinterpret_cast<void **>( &d_outParams ), sizeof( cb_outParams<T> ) ) );
@@ -130,23 +122,17 @@ void cufftMalloc_c2c( const T *     inputSignal,
 
     for ( int i = 0; i < kLoops; i++ ) {
 #ifdef USE_DOUBLE
-        CUDA_RT_CALL( cufftExecZ2Z( fft_forward, d_inputData, d_bufferData, CUFFT_FORWARD ) );
-        CUDA_RT_CALL( cufftExecZ2Z( fft_inverse, d_bufferData, d_outputData, CUFFT_INVERSE ) );
+        CUDA_RT_CALL( cufftExecZ2Z( fft_forward, const_cast<T *>( inputSignal ), d_bufferData, CUFFT_FORWARD ) );
+        CUDA_RT_CALL( cufftExecZ2Z( fft_inverse, d_bufferData, outputData, CUFFT_INVERSE ) );
 #else
-        CUDA_RT_CALL( cufftExecC2C( fft_forward, d_inputData, d_bufferData, CUFFT_FORWARD ) );
-        CUDA_RT_CALL( cufftExecC2C( fft_inverse, d_bufferData, d_outputData, CUFFT_INVERSE ) );
+        CUDA_RT_CALL( cufftExecC2C( fft_forward, const_cast<T *>( inputSignal ), d_bufferData, CUFFT_FORWARD ) );
+        CUDA_RT_CALL( cufftExecC2C( fft_inverse, d_bufferData, outputData, CUFFT_INVERSE ) );
 #endif
     }
     timer.stopAndPrintGPU( kLoops );
 
-    // Copy data from device to host
-    CUDA_RT_CALL( cudaMemcpy( h_outputData, d_outputData, signalSize, cudaMemcpyDeviceToHost ) );
-
     // Cleanup Memory
-    CUDA_RT_CALL( cudaFree( d_inputData ) );
-    CUDA_RT_CALL( cudaFree( d_outputData ) );
     CUDA_RT_CALL( cudaFree( d_bufferData ) );
-    CUDA_RT_CALL( cudaFree( d_multiplier ) );
     CUDA_RT_CALL( cudaFree( d_inParams ) );
     CUDA_RT_CALL( cudaFree( d_outParams ) );
 }

@@ -126,4 +126,8 @@ void cufftdxMalloc( const int &   device,
             const_cast<T *>( inputSignal ), outputData, inParams, outParams );
     }
     timer.stopAndPrintGPU( kLoops );
+
+    // Cleanup Memory
+    CUDA_RT_CALL( cudaFree( inParams ) );
+    CUDA_RT_CALL( cudaFree( outParams ) );
 }

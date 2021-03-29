@@ -125,4 +125,6 @@ void cufftManaged( const int &   device,
 
     // Cleanup Memory
     CUDA_RT_CALL( cudaFree( bufferData ) );
+    CUDA_RT_CALL( cudaFree( inParams ) );
+    CUDA_RT_CALL( cudaFree( outParams ) );
 }
