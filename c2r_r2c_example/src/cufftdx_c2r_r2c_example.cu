@@ -12,7 +12,7 @@
 #include "../../common/cuda_helper.h"
 
 template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
-void benchmark_r2r( ) {
+void benchmark( ) {
 
 #ifdef USE_DOUBLE
     using run_type   = double;
@@ -24,18 +24,27 @@ void benchmark_r2r( ) {
     using buf_type   = cufftReal;
 #endif
 
+    int device = -1;
+    CUDA_RT_CALL( cudaGetDevice( &device ) );
+
     // Calculate size of signal array to process
     const size_t signalSize { sizeof( cufft_type ) * SIZE * BATCH };
+    const size_t bufferSize { signalSize / 2 };
 
     // Set fft plan parameters
     fft_params fftPlan { kRank, { SIZE }, 1, 1, SIZE, SIZE, { 0 }, { 0 }, BATCH };
 
-    cufft_type *cufftHostData        = new cufft_type[signalSize];
-    cufft_type *cufftManagedHostData = new cufft_type[signalSize];
-    cufft_type *cufftDxHostData      = new cufft_type[signalSize];
+    cufft_type *cufftHostData;
+    cufft_type *cufftManagedHostData;
+    cufft_type *cufftDxHostData;
+
+    CUDA_RT_CALL( cudaMallocManaged( &cufftHostData, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &cufftManagedHostData, signalSize ) );
+    CUDA_RT_CALL( cudaMallocManaged( &cufftDxHostData, signalSize ) );
 
     // Create input signal
-    cufft_type *inputData = new cufft_type[signalSize];
+    cufft_type *inputData;
+    CUDA_RT_CALL( cudaMallocManaged( &inputData, signalSize ) );
 
     std::mt19937                             eng;
     std::uniform_real_distribution<run_type> dist( kLower, kUpper );
@@ -46,11 +55,14 @@ void benchmark_r2r( ) {
     }
 
     // Create multipler signal
-    buf_type *  multDataIn  = new buf_type[signalSize / 2];
-    cufft_type *multDataOut = new cufft_type[signalSize];
+    buf_type *  multDataIn;
+    cufft_type *multDataOut;  
+
+    CUDA_RT_CALL( cudaMallocManaged( &multDataIn, signalSize/2 ) );
+    CUDA_RT_CALL( cudaMallocManaged( &multDataOut, signalSize ) );
     for ( int i = 0; i < ( SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
-        multDataIn[i]    = temp;
+        multDataIn[i]    = temp;  
         multDataOut[i].x = temp;
         multDataOut[i].y = temp + 1;
     }
@@ -59,24 +71,24 @@ void benchmark_r2r( ) {
 
     std::printf( "FFT Size: %d -- Batch: %d -- FFT Per Block: %d -- EPT: %d\n", SIZE, BATCH, FPB, EPT );
     cufftMalloc<cufft_type, buf_type, run_type, SIZE, BATCH>(
-        inputData, multDataIn, multDataOut, scalar, signalSize, fftPlan, cufftHostData );
+        device, inputData, multDataIn, multDataOut, scalar, signalSize, bufferSize, fftPlan, cufftHostData );
 
     cufftManaged<cufft_type, buf_type, run_type, SIZE, BATCH>(
-        inputData, multDataIn, multDataOut, scalar, signalSize, fftPlan, cufftManagedHostData );
+        device, inputData, multDataIn, multDataOut, scalar, signalSize, bufferSize, fftPlan, cufftManagedHostData );
     verifyResults_c2c<cufft_type, SIZE, BATCH>( cufftHostData, cufftManagedHostData, ( SIZE / 2 + 1 ) );
 
     cufftdxMalloc<cufft_type, buf_type, run_type, ARCH, SIZE, BATCH, FPB, EPT>(
-        inputData, multDataIn, multDataOut, scalar, signalSize, cufftDxHostData );
+        device, inputData, multDataIn, multDataOut, scalar, signalSize, bufferSize, cufftDxHostData );
 
     // Verify cuFFT and cuFFTDx have the same results
     verifyResults_c2c<cufft_type, SIZE, BATCH>( cufftHostData, cufftDxHostData, ( SIZE / 2 + 1 ) );
 
-    delete[]( inputData );
-    delete[]( multDataIn );
-    delete[]( multDataOut );
-    delete[]( cufftHostData );
-    delete[]( cufftManagedHostData );
-    delete[]( cufftDxHostData );
+    CUDA_RT_CALL( cudaFree( inputData ));
+    CUDA_RT_CALL( cudaFree( multDataIn ));
+    CUDA_RT_CALL( cudaFree( multDataOut ));
+    CUDA_RT_CALL( cudaFree( cufftHostData ));
+    CUDA_RT_CALL( cudaFree( cufftManagedHostData ));
+    CUDA_RT_CALL( cudaFree( cufftDxHostData ));
 }
 
 int main( int argc, char **argv ) {
@@ -88,13 +100,13 @@ int main( int argc, char **argv ) {
         // template<uint ARCH, uint SIZE, uint BATCH, uint FPB, uint EPT>
 #ifdef USE_DOUBLE
     case 700:
-        benchmark_r2r<700, 8192, 16384, 1, 16>( );
+        benchmark<700, 8192, 16384, 1, 16>( );
         break;
     case 750:
-        benchmark_r2r<750, 2048, 16384, 1, 16>( );
+        benchmark<750, 2048, 16384, 1, 16>( );
         break;
     case 800:
-        benchmark_r2r<800, 16384, 16384, 1, 16>( );
+        benchmark<800, 16384, 16384, 1, 16>( );
         break;
     default:
         std::printf( "GPU architecture not found see cuFFTDx docs\n "
@@ -103,13 +115,13 @@ int main( int argc, char **argv ) {
     }
 #else
     case 700:
-        benchmark_r2r<700, 16384, 16384, 1, 32>( );
+        benchmark<700, 16384, 16384, 1, 32>( );
         break;
     case 750:
-        benchmark_r2r<750, 4096, 16384, 1, 16>( );
+        benchmark<750, 4096, 16384, 1, 16>( );
         break;
     case 800:
-        benchmark_r2r<800, 32768, 16384, 1, 32>( );
+        benchmark<800, 32768, 16384, 1, 32>( );
         break;
     default:
         std::printf( "GPU architecture not found see cuFFTDx docs\n "
