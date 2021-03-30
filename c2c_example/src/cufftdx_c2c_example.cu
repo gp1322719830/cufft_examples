@@ -45,7 +45,7 @@ void benchmark( ) {
 
     std::mt19937                             eng;
     std::uniform_real_distribution<run_type> dist( kLower, kUpper );
-    for ( int i = 0; i < ( 2 * SIZE * BATCH ); i++ ) {
+    for ( int i = 0; i < ( SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
         inputData[i].x = temp;
         inputData[i].y = temp;
@@ -55,7 +55,7 @@ void benchmark( ) {
     // cufft_type *multData = new cufft_type[SIZE * BATCH * 2];
     cufft_type *multData;
     CUDA_RT_CALL( cudaMallocManaged( &multData, signalSize ) );
-    for ( int i = 0; i < ( 2 * SIZE * BATCH ); i++ ) {
+    for ( int i = 0; i < (  SIZE * BATCH ); i++ ) {
         run_type temp { dist( eng ) };
         multData[i].x = temp;
         multData[i].y = temp;
